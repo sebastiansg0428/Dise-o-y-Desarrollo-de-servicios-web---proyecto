@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Autenticación</title>
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3064/3064197.png" />
+    <!-- Ícono o logo en la pestaña -->
+
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 400px;
+            margin: 50px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            text-align: center;
+            color: #50ed20;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 30px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 10px;
+            color: #0a7de1;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #50ed20;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .switch-btn {
+            background-color: #28a745;
+        }
+
+        .switch-btn:hover {
+            background-color: #1e7e34;
+        }
+
+        .message {
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .hidden {
+            display: none;
+
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Formulario de Login -->
+        <div id="loginForm">
+            <h2>Iniciar Sesión</h2>
+            <form id="loginFormElement">
+                <div class="form-group">
+                    <label for="loginEmail">Ingresa tu correo electrónico:</label>
+                    <input type="email" id="loginEmail" required placeholder="ejemplo@gmail.com">
+
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Ingresa tu Contraseña:</label>
+                    <input type="password" id="loginPassword" required placeholder="******">
+                </div>
+                <button type="submit">Iniciar Sesión</button>
+                <button type="button" class="switch-btn" onclick="showRegister()">Crear Cuenta</button>
+            </form>
+            <div id="loginMessage"></div>
+        </div>
+
+        <!-- Formulario de Registro -->
+        <div id="registerForm" class="hidden">
+            <h2>Crear Cuenta</h2>
+            <form id="registerFormElement">
+                <div class="form-group">
+                    <label for="registerEmail">Ingresa tu correo electrónico:</label>
+                    <input type="email" id="registerEmail" required placeholder="ejemplo@gmail.com">
+                </div>
+                <div class="form-group">
+                    <label for="registerPassword">Ingresa tu Contraseña:</label>
+                    <input type="password" id="registerPassword" required placeholder="******">
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">Confirmar Contraseña:</label>
+                    <input type="password" id="confirmPassword" required placeholder="******">
+                </div>
+                <button type="submit">Registrarme</button>
+                <button type="button" class="switch-btn" onclick="showLogin()">Ya tengo cuenta</button>
+            </form>
+            <div id="registerMessage"></div>
+        </div>
+    </div>
+
+    <script>
+        function showLogin() {
+            document.getElementById('loginForm').classList.remove('hidden');
+            document.getElementById('registerForm').classList.add('hidden');
+        }
+
+        function showRegister() {
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('registerForm').classList.remove('hidden');
+        }
+
+        function showMessage(elementId, message, isSuccess) {
+            const messageDiv = document.getElementById(elementId);
+            messageDiv.innerHTML = message;
+            messageDiv.className = 'message ' + (isSuccess ? 'success' : 'error');
+        }
+
+        document.getElementById('loginFormElement').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            try {
+                const response = await fetch(`http://localhost:3001/login?email=${email}&password=${password}`);
+                const result = await response.text();
+
+                if (result === 'login successful') {
+                    // Guardar email en localStorage
+                    localStorage.setItem('userEmail', email);
+                    
+                    showMessage('loginMessage', '¡Login exitoso! Redirigiendo...', true);
+                    
+                    // Redirigir a home.html después de 1 segundo
+                    setTimeout(() => {
+                        window.location.href = '/home.html';
+                    }, 1000);
+                } else {
+                    showMessage('loginMessage', 'Credenciales incorrectas', false);
+                }
+            } catch (error) {
+                showMessage('loginMessage', 'Error de conexión', false);
+            }
+        });
+
+        document.getElementById('registerFormElement').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (password !== confirmPassword) {
+                showMessage('registerMessage', 'Las contraseñas no coinciden', false);
+                return;
+            }
+
+            try {
+                const response = await fetch(`http://localhost:3001/register?email=${email}&password=${password}`);
+                const result = await response.text();
+
+                if (result === 'register successful') {
+                    showMessage('registerMessage', '¡Cuenta creada exitosamente!', true);
+                    setTimeout(() => {
+                        showLogin();
+                        document.getElementById('registerFormElement').reset();
+                    }, 2000);
+                } else {
+                    showMessage('registerMessage', 'Error usuario ya existe', false);
+                }
+            } catch (error) {
+                showMessage('registerMessage', 'Error de conexión', false);
+            }
+        });
+    </script>
+</body>
+
+</html>
