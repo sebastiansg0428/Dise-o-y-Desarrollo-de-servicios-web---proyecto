@@ -1,86 +1,146 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home - Sistema de Autenticación</title>
+    <title>Inicio - Sistema de Autenticación</title>
+
     <style>
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f5f5f5;
             margin: 0;
-            padding: 20px;
+            font-family: "Poppins", Arial, sans-serif;
+            background: #eef1f5;
         }
+
+        /* Contenedor general */
         .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 900px;
+            margin: 100px auto;
+            background: #fff;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            animation: fadeIn 0.4s ease-in-out;
         }
+
+        /* Header superior */
+        .top-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 15px 25px;
+            background: #0a7de1;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+        }
+
+        .logout-btn {
+            background: rgb(255, 77, 77);
+            border: none;
+            padding: 10px 18px;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.2s;
+            font-weight: bold;
+            margin-right: 40px;
+
+        }
+
+        .logout-btn:hover {
+            background: rgb(225, 40, 40);
+        }
+
+        /* Bienvenida */
         h1 {
             text-align: center;
-            color: #333;
-            margin-bottom: 30px;
+            color: #222;
+            margin-bottom: 25px;
+            font-size: 28px;
         }
+
         .user-info {
-            background-color: #e8f5e8;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 30px;
-            text-align: center;
+            background: #e1f7e7;
+            border-left: 5px solid #28a745;
+            padding: 18px;
+            border-radius: 10px;
+            margin-bottom: 40px;
+            font-size: 18px;
         }
-        .users-table {
+
+        /* Tabla */
+        table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 20px;
+            margin-top: 15px;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
         }
-        .users-table th, .users-table td {
-            border: 1px solid #ddd;
-            padding: 12px;
-            text-align: left;
-        }
-        .users-table th {
-            background-color: #f8f9fa;
-            font-weight: bold;
-        }
-        .users-table tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        .logout-btn {
-            background-color: #dc3545;
+
+        table th {
+            background: #0a7de1;
             color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            float: right;
-            margin-bottom: 20px;
+            padding: 12px;
+            font-size: 15px;
         }
-        .logout-btn:hover {
-            background-color: #c82333;
+
+        table td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
         }
+
+        tr:nth-child(even) {
+            background: #f7f7f7;
+        }
+
         .loading {
             text-align: center;
-            color: #666;
+            padding: 20px;
             font-style: italic;
         }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
     </style>
+
 </head>
+
 <body>
-    <div class="container">
+
+    <!-- Barra superior -->
+    <div class="top-bar">
+        <h2>Sistema de Autenticación</h2>
         <button class="logout-btn" onclick="logout()">Cerrar Sesión</button>
-        <div style="clear: both;"></div>
-        
-        <h1>¡Bienvenido al Sistema!</h1>
-        
+    </div>
+
+    <!-- Contenido -->
+    <div class="container">
+        <h1>¡Bienvenido al sistema!</h1>
+
         <div class="user-info">
-            <h3>Sesión iniciada correctamente</h3>
-            <p>Email: <span id="userEmail"></span></p>
+            <strong>Sesión iniciada como:</strong>
+            <span id="userEmail" style="font-weight:bold;"></span>
         </div>
 
-        <h2>Usuarios Registrados</h2>
+        <h2 style="margin-top: 10px;">Usuarios Registrados</h2>
+
         <div id="usersContainer">
             <div class="loading">Cargando usuarios...</div>
         </div>
@@ -98,20 +158,20 @@
             try {
                 const response = await fetch('http://localhost:3001/usuarios');
                 const users = await response.json();
-                
+
                 if (users.error) {
-                    document.getElementById('usersContainer').innerHTML = 
+                    document.getElementById('usersContainer').innerHTML =
                         `<p style="color: red;">Error: ${users.error}</p>`;
                     return;
                 }
 
                 let tableHTML = `
-                    <table class="users-table">
+                    <table>
                         <thead>
                             <tr>
                                 <th>ID</th>
                                 <th>Email</th>
-                                <th>Fecha de Registro</th>
+                                <th>Estado</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -122,46 +182,44 @@
                         <tr>
                             <td>${user.id}</td>
                             <td>${user.email}</td>
-                            <td>Usuario registrado</td>
-                        </tr>
-                    `;
+                            <td>Registrado</td>
+                        </tr>`;
                 });
 
-                tableHTML += `
-                        </tbody>
-                    </table>
-                `;
-
+                tableHTML += `</tbody></table>`;
                 document.getElementById('usersContainer').innerHTML = tableHTML;
+
             } catch (error) {
-                document.getElementById('usersContainer').innerHTML = 
+                document.getElementById('usersContainer').innerHTML =
                     '<p style="color: red;">Error al cargar usuarios</p>';
             }
         }
 
-        // Función para cerrar sesión
+        // Cerrar sesión
         function logout() {
             localStorage.removeItem('userEmail');
             window.location.href = '/';
         }
 
-        // Verificar si hay sesión activa
+        // Revisar sesión activa
         function checkSession() {
-            const userEmail = localStorage.getItem('userEmail');
-            if (!userEmail) {
-                alert('Debes iniciar sesión para acceder a esta página');
+            const email = localStorage.getItem('userEmail');
+            if (!email) {
+                alert('Debes iniciar sesión para acceder a esta página.');
                 window.location.href = '/';
                 return false;
             }
             return true;
         }
 
-        // Cargar usuarios al cargar la página
-        window.onload = function() {
+        // Cargar usuarios cuando la página inicia
+        window.onload = () => {
             if (checkSession()) {
                 loadUsers();
             }
         };
     </script>
+
 </body>
+
 </html>

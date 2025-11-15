@@ -26,9 +26,9 @@ const pool = mysql.createPool({
 
 // Endpoint para el login de usuarios
 // Método GET: /login?email=usuario@email.com&password=123456
-app.post('/login', async (req, res) => {
+app.get('/login', async (req, res) => {
     // Extrae email y password de los parámetros de la URL
-    const { email, password } = req.body
+    const { email, password } = req.query
 
     console.log('=== LOGIN ATTEMPT ===')
     console.log('Email:', email)
@@ -68,9 +68,9 @@ app.post('/login', async (req, res) => {
 
 // Endpoint para el registro de nuevos usuarios
 // Método GET: /register?email=nuevo@email.com&password=123456
-app.post('/register', async (req, res) => {
+app.get('/register', async (req, res) => {
     // Extrae email y password de los parámetros de la URL
-    const { email, password } = req.body
+    const { email, password } = req.query
 
     console.log('=== REGISTER ATTEMPT ===')
     console.log('Email:', email)
@@ -103,7 +103,7 @@ app.post('/register', async (req, res) => {
 })
 
 // Endpoint para ver todos los usuarios
-app.post('/usuarios', async (req, res) => {
+app.get('/usuarios', async (req, res) => {
     try {
         const [rows] = await pool.promise()
             .query('SELECT `id`, `email`, DATE_FORMAT(created_at, "%d/%m/%Y %H:%i") as fecha_registro FROM `usuarios` ORDER BY id DESC');
