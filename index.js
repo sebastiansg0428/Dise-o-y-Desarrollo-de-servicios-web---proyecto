@@ -25,10 +25,10 @@ const pool = mysql.createPool({
 
 
 // Endpoint para el login de usuarios
-// Método GET: /login?email=usuario@email.com&password=123456
-app.get('/login', async (req, res) => {
-    // Extrae email y password de los parámetros de la URL
-    const { email, password } = req.query
+// Método POST: enviar JSON { email: string, password: string }
+app.post('/login', async (req, res) => {
+    // Extrae email y password del body (JSON)
+    const { email, password } = req.body
 
     console.log('=== LOGIN ATTEMPT ===')
     console.log('Email:', email)
@@ -67,10 +67,10 @@ app.get('/login', async (req, res) => {
 })
 
 // Endpoint para el registro de nuevos usuarios
-// Método GET: /register?email=nuevo@email.com&password=123456
-app.get('/register', async (req, res) => {
-    // Extrae email y password de los parámetros de la URL
-    const { email, password } = req.query
+// Método POST: enviar JSON { email: string, password: string }
+app.post('/register', async (req, res) => {
+    // Extrae email y password del body (JSON)
+    const { email, password } = req.body
 
     console.log('=== REGISTER ATTEMPT ===')
     console.log('Email:', email)
@@ -147,7 +147,7 @@ app.listen(port, () => {
     console.log('- http://localhost:3001/ (Login/Registro)')
     console.log('- http://localhost:3001/home.html (Home con usuarios)')
     console.log('Endpoints API:')
-    console.log('- GET /login?email=tu@email.com&password=tupassword')
-    console.log('- GET /register?email=nuevo@email.com&password=nuevapassword')
+    console.log('- POST /login (body JSON: { email, password })')
+    console.log('- POST /register (body JSON: { email, password })')
     console.log('- GET /usuarios (listado de usuarios)')
 })
