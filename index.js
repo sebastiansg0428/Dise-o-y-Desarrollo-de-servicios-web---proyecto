@@ -135,6 +135,105 @@ app.delete('/usuarios/:id', async (req, res) => {
     }
 });
 
+// -----------------------
+// Endpoints para productos
+// -----------------------
+
+// Listar productos
+app.get('/productos', async (req, res) => {
+    try {
+        const [rows] = await pool.promise()
+            .query('SELECT `id`, `nombre`, `descripcion`, `categoria`, `stock`, `precio_compra`, `precio_venta`, DATE_FORMAT(created_at, "%d/%m/%Y %H:%i") as fecha_creacion FROM `productos` ORDER BY id DESC');
+        res.json(rows);
+    } catch (error) {
+        try {
+            const [simpleRows] = await pool.promise()
+                .query('SELECT `id`, `nombre`, `descripcion`, `categoria`, `stock`, `precio_compra`, `precio_venta` FROM `productos` ORDER BY id DESC');
+            res.json(simpleRows);
+        } catch (simpleError) {
+            res.json({ error: simpleError.message });
+        }
+    }
+});
+
+// Obtener producto por id
+app.get('/productos/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [rows] = await pool.promise().query('SELECT * FROM productos WHERE id = ?', [id]);
+        if (rows.length > 0) res.json(rows[0]);
+        else res.json({ error: 'Producto no encontrado' });
+    } catch (error) {
+        res.json({ error: error.message });
+    }
+});
+
+// Crear producto
+app.post('/productos', async (req, res) => {
+    const { nombre, descripcion, categoria, stock, precio_compra, precio_venta } = req.body;
+    try {
+        const [result] = await pool.promise().query(
+            'INSERT INTO productos (nombre, descripcion, categoria, stock, precio_compra, precio_venta) VALUES (?, ?, ?, ?, ?, ?)',
+            [nombre, descripcion || null, categoria || null, stock || 0, precio_compra || 0, precio_venta || 0]
+        );
+        if (result.affectedRows > 0) {
+            res.json({ success: true, id: result.insertId });
+        } else {
+            res.json({ success: false });
+        }
+    } catch (error) {
+        res.json({ success: false, message: error.message });
+    }
+});
+
+// Actualizar producto
+app.put('/productos/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nombre, descripcion, categoria, stock, precio_compra, precio_venta } = req.body;
+    try {
+        const [result] = await pool.promise().query(
+            'UPDATE productos SET nombre = ?, descripcion = ?, categoria = ?, stock = ?, precio_compra = ?, precio_venta = ? WHERE id = ?',
+            [nombre, descripcion || null, categoria || null, stock || 0, precio_compra || 0, precio_venta || 0, id]
+        );
+        if (result.affectedRows > 0) res.json({ success: true });
+        else res.json({ success: false, message: 'Producto no encontrado' });
+    } catch (error) {
+        res.json({ success: false, message: error.message });
+    }
+});
+
+// Eliminar producto
+app.delete('/productos/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [result] = await pool.promise().query('DELETE FROM productos WHERE id = ?', [id]);
+        if (result.affectedRows > 0) {
+            res.json({ success: true });
+        } else {
+            res.json({ success: false, message: 'Producto no encontrado' });
+        }
+    } catch (error) {
+        res.json({ success: false, message: error.message });
+    }
+});
+
+// Calcular ganancia por producto (por unidad y total según stock)
+app.get('/productos/:id/ganancia', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [rows] = await pool.promise().query('SELECT precio_compra, precio_venta, stock FROM productos WHERE id = ?', [id]);
+        if (rows.length === 0) return res.json({ error: 'Producto no encontrado' });
+        const { precio_compra, precio_venta, stock } = rows[0];
+        const unidad_compra = parseFloat(precio_compra);
+        const unidad_venta = parseFloat(precio_venta);
+        const ganancia_unitaria = unidad_venta - unidad_compra;
+        const ganancia_total = ganancia_unitaria * (Number(stock) || 0);
+        res.json({ ganancia_unitaria: ganancia_unitaria.toFixed(2), ganancia_total: ganancia_total.toFixed(2), stock: Number(stock) });
+    } catch (error) {
+        res.json({ error: error.message });
+    }
+});
+
 
 
 
@@ -150,4 +249,10 @@ app.listen(port, () => {
     console.log('- POST /login (body JSON: { email, password })')
     console.log('- POST /register (body JSON: { email, password })')
     console.log('- GET /usuarios (listado de usuarios)')
+    console.log('- GET /productos (listado de productos)')
+    console.log('- GET /productos/:id (producto por id)')
+    console.log('- POST /productos (crear producto) {nombre, descripcion, categoria, stock, precio_compra, precio_venta}')
+    console.log('- PUT /productos/:id (actualizar producto)')
+    console.log('- DELETE /productos/:id (eliminar producto)')
+    console.log('- GET /productos/:id/ganancia (calcular ganancia por producto)')
 })

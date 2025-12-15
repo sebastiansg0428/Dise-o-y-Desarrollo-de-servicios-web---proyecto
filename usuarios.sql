@@ -64,6 +64,25 @@ ALTER TABLE `usuarios`
 --
 ALTER TABLE `usuarios`
   MODIFY `id` int(150) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+-- --------------------------------------------------------
+-- Tabla `productos` (para gestión de inventario y ventas)
+-- --------------------------------------------------------
+CREATE TABLE `productos` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `nombre` varchar(200) NOT NULL,
+  `descripcion` text,
+  `categoria` varchar(100) DEFAULT NULL,
+  `stock` int(11) NOT NULL DEFAULT 0,
+  `precio_compra` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `precio_venta` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Datos de ejemplo para `productos`
+INSERT INTO `productos` (`id`, `nombre`, `descripcion`, `categoria`, `stock`, `precio_compra`, `precio_venta`) VALUES
+(1, 'Proteína Whey 1kg', 'Proteína en polvo sabor vainilla', 'Suplementos', 10, 20.00, 35.00),
+(2, 'Barra energética', 'Barra de cereales y frutos secos', 'Alimentos', 50, 0.50, 1.50);
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
