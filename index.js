@@ -103,7 +103,7 @@ app.post('/register', async (req, res) => {
 })
 
 // Endpoint para ver todos los usuarios
-app.get('/usuarios', async (req, res) => {
+app.get('/usuarios/', async (req, res) => {
     try {
         const [rows] = await pool.promise()
             .query('SELECT `id`, `email`, DATE_FORMAT(created_at, "%d/%m/%Y %H:%i") as fecha_registro FROM `usuarios` ORDER BY id DESC');
@@ -119,6 +119,40 @@ app.get('/usuarios', async (req, res) => {
         }
     }
 })
+
+// Endpoint para ver un usuario por ID
+app.get('/usuarios/:id', async (req, res) => {
+    const { id } = req.params;
+    // Validar que el id sea numérico
+    if (!/^[0-9]+$/.test(id)) {
+        return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    try {
+        // Intentar devolver la fecha formateada si la columna existe
+        const [rows] = await pool.promise().query(
+            'SELECT id, email, DATE_FORMAT(created_at, "%d/%m/%Y %H:%i") as fecha_registro FROM usuarios WHERE id = ?',
+            [id]
+        );
+
+        if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+        return res.json(rows[0]);
+    } catch (error) {
+        // Si la columna created_at no existe, hacer un fallback a una consulta simple
+        if (error && error.code === 'ER_BAD_FIELD_ERROR') {
+            try {
+                const [rows] = await pool.promise().query('SELECT id, email FROM usuarios WHERE id = ?', [id]);
+                if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+                return res.json(rows[0]);
+            } catch (err2) {
+                return res.status(500).json({ error: err2.message });
+            }
+        }
+        return res.status(500).json({ error: error.message });
+    }
+});
+
+
 
 // 🆕 Eliminar usuario por ID (nuevo endpoint)
 app.delete('/usuarios/:id', async (req, res) => {
