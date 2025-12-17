@@ -169,6 +169,43 @@ app.delete('/usuarios/:id', async (req, res) => {
     }
 });
 
+// Crear usuario (equivalente a /register, ruta genérica para API)
+app.post('/usuarios', async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ success: false, message: 'email y password son requeridos' });
+    try {
+        const [rows] = await pool.promise().query('INSERT INTO `usuarios` (`email`, `password`) VALUES (?, ?)', [email, password]);
+        if (rows.affectedRows > 0) {
+            return res.status(201).json({ success: true, id: rows.insertId });
+        }
+        return res.status(500).json({ success: false, message: 'no se pudo crear usuario' });
+    } catch (error) {
+        if (error && error.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'email ya existe' });
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// Actualizar usuario (email y/o password)
+app.put('/usuarios/:id', async (req, res) => {
+    const { id } = req.params;
+    if (!/^[0-9]+$/.test(id)) return res.status(400).json({ success: false, message: 'ID inválido' });
+    const { email, password } = req.body;
+    const updates = [];
+    const values = [];
+    if (email) { updates.push('email = ?'); values.push(email); }
+    if (password) { updates.push('password = ?'); values.push(password); }
+    if (updates.length === 0) return res.status(400).json({ success: false, message: 'Nada para actualizar' });
+    values.push(id);
+    try {
+        const [result] = await pool.promise().query(`UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`, values);
+        if (result.affectedRows > 0) return res.json({ success: true });
+        return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+    } catch (error) {
+        if (error && error.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'email ya existe' });
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 // -----------------------
 // Endpoints para productos
 // -----------------------
@@ -476,6 +513,14 @@ app.listen(port, () => {
     console.log('- POST /login (body JSON: { email, password })')
     console.log('- POST /register (body JSON: { email, password })')
     console.log('- GET /usuarios (listado de usuarios)')
+    console.log('- GET /usuarios/:id (usuario por id)')
+    console.log('- DELETE /usuarios/:id (eliminar usuario)')
+    console.log('- POST /usuarios (crear usuario) {email, password}')
+    console.log('- PUT /usuarios/:id (actualizar usuario)')
+    console.log('- POST /usuarios/:id/rutinas (agregar rutina a usuario)')
+    console.log('- PUT /usuarios/:usuarioId/rutinas/:asignacionId (actualizar asignación)')
+    console.log('- GET /usuarios/:id/rutinas (listado de rutinas asignadas a un usuario)')
+    
     console.log('- GET /productos (listado de productos)')
     console.log('- GET /productos/:id (producto por id)')
     console.log('- POST /productos (crear producto) {nombre, descripcion, categoria, stock, precio_compra, precio_venta}')
