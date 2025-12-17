@@ -272,6 +272,199 @@ app.get('/productos/:id/ganancia', async (req, res) => {
 
 
 
+    // -----------------------
+    // Endpoints para rutinas y ejercicios
+    // -----------------------
+
+    // Listar todas las rutinas
+    app.get('/rutinas', async (req, res) => {
+        try {
+            const [rows] = await pool.promise().query('SELECT * FROM rutinas ORDER BY id DESC');
+            res.json(rows);
+        } catch (error) {
+            res.status(500).json({ error: error.message });
+        }
+    });
+
+    // Obtener una rutina por id, incluyendo ejercicios ordenados
+    app.get('/rutinas/:id', async (req, res) => {
+        const { id } = req.params;
+        try {
+            const [rutinas] = await pool.promise().query('SELECT * FROM rutinas WHERE id = ?', [id]);
+            if (rutinas.length === 0) return res.status(404).json({ error: 'Rutina no encontrada' });
+
+            const [ejercicios] = await pool.promise().query(
+                `SELECT re.id as re_id, e.id as ejercicio_id, e.nombre, e.grupo_muscular, e.equipo, e.tipo, re.orden, re.series, re.repeticiones_min, re.repeticiones_max, re.descanso_seg, re.peso_kg, re.notas
+                 FROM rutina_ejercicios re
+                 JOIN ejercicios e ON re.ejercicio_id = e.id
+                 WHERE re.rutina_id = ?
+                 ORDER BY re.orden ASC`,
+                [id]
+            );
+
+            res.json({ rutina: rutinas[0], ejercicios });
+        } catch (error) {
+            res.status(500).json({ error: error.message });
+        }
+    });
+
+    // Crear una nueva rutina
+    app.post('/rutinas', async (req, res) => {
+        const { nombre, descripcion, nivel, objetivo, duracion_semanas, frecuencia_por_semana } = req.body;
+        try {
+            const [result] = await pool.promise().query(
+                'INSERT INTO rutinas (nombre, descripcion, nivel, objetivo, duracion_semanas, frecuencia_por_semana) VALUES (?, ?, ?, ?, ?, ?)',
+                [nombre, descripcion || null, nivel || null, objetivo || null, duracion_semanas || null, frecuencia_por_semana || null]
+            );
+            res.json({ success: true, id: result.insertId });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
+    // Actualizar rutina
+    app.put('/rutinas/:id', async (req, res) => {
+        const { id } = req.params;
+        const { nombre, descripcion, nivel, objetivo, duracion_semanas, frecuencia_por_semana } = req.body;
+        try {
+            const [result] = await pool.promise().query(
+                'UPDATE rutinas SET nombre = ?, descripcion = ?, nivel = ?, objetivo = ?, duracion_semanas = ?, frecuencia_por_semana = ? WHERE id = ?',
+                [nombre, descripcion || null, nivel || null, objetivo || null, duracion_semanas || null, frecuencia_por_semana || null, id]
+            );
+            if (result.affectedRows > 0) res.json({ success: true });
+            else res.status(404).json({ success: false, message: 'Rutina no encontrada' });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
+    // Eliminar rutina
+    app.delete('/rutinas/:id', async (req, res) => {
+        const { id } = req.params;
+        try {
+            const [result] = await pool.promise().query('DELETE FROM rutinas WHERE id = ?', [id]);
+            if (result.affectedRows > 0) res.json({ success: true });
+            else res.status(404).json({ success: false, message: 'Rutina no encontrada' });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
+    // Añadir ejercicio a una rutina
+    app.post('/rutinas/:id/ejercicios', async (req, res) => {
+        const { id } = req.params; // rutina id
+        const { ejercicio_id, orden, series, repeticiones_min, repeticiones_max, descanso_seg, peso_kg, notas } = req.body;
+        try {
+            const [result] = await pool.promise().query(
+                'INSERT INTO rutina_ejercicios (rutina_id, ejercicio_id, orden, series, repeticiones_min, repeticiones_max, descanso_seg, peso_kg, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [id, ejercicio_id, orden || 0, series || null, repeticiones_min || null, repeticiones_max || null, descanso_seg || null, peso_kg || null, notas || null]
+            );
+            res.json({ success: true, id: result.insertId });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
+    // Actualizar una entrada rutina_ejercicios
+    app.put('/rutinas/ejercicios/:id', async (req, res) => {
+        const { id } = req.params;
+        const { orden, series, repeticiones_min, repeticiones_max, descanso_seg, peso_kg, notas } = req.body;
+        try {
+            const [result] = await pool.promise().query(
+                'UPDATE rutina_ejercicios SET orden = ?, series = ?, repeticiones_min = ?, repeticiones_max = ?, descanso_seg = ?, peso_kg = ?, notas = ? WHERE id = ?',
+                [orden || 0, series || null, repeticiones_min || null, repeticiones_max || null, descanso_seg || null, peso_kg || null, notas || null, id]
+            );
+            if (result.affectedRows > 0) res.json({ success: true });
+            else res.status(404).json({ success: false, message: 'Entrada no encontrada' });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
+    // Eliminar ejercicio de una rutina (entrada)
+    app.delete('/rutinas/ejercicios/:id', async (req, res) => {
+        const { id } = req.params;
+        try {
+            const [result] = await pool.promise().query('DELETE FROM rutina_ejercicios WHERE id = ?', [id]);
+            if (result.affectedRows > 0) res.json({ success: true });
+            else res.status(404).json({ success: false, message: 'Entrada no encontrada' });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
+    // CRUD para ejercicios
+    app.get('/ejercicios', async (req, res) => {
+        try {
+            const [rows] = await pool.promise().query('SELECT * FROM ejercicios ORDER BY id DESC');
+            res.json(rows);
+        } catch (error) {
+            res.status(500).json({ error: error.message });
+        }
+    });
+
+    app.post('/ejercicios', async (req, res) => {
+        const { nombre, descripcion, grupo_muscular, equipo, tipo } = req.body;
+        try {
+            const [result] = await pool.promise().query(
+                'INSERT INTO ejercicios (nombre, descripcion, grupo_muscular, equipo, tipo) VALUES (?, ?, ?, ?, ?)',
+                [nombre, descripcion || null, grupo_muscular || null, equipo || null, tipo || null]
+            );
+            res.json({ success: true, id: result.insertId });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
+    // Asignar una rutina a un usuario
+    app.post('/usuarios/:id/rutinas', async (req, res) => {
+        const { id } = req.params; // usuario id
+        const { rutina_id, fecha_inicio, fecha_fin, estado, progreso } = req.body;
+        try {
+            const [result] = await pool.promise().query(
+                'INSERT INTO usuarios_rutinas (usuario_id, rutina_id, fecha_inicio, fecha_fin, estado, progreso) VALUES (?, ?, ?, ?, ?, ?)',
+                [id, rutina_id, fecha_inicio || new Date(), fecha_fin || null, estado || 'activa', progreso || null]
+            );
+            res.json({ success: true, id: result.insertId });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
+    // Listar rutinas asignadas a un usuario
+    app.get('/usuarios/:id/rutinas', async (req, res) => {
+        const { id } = req.params;
+        try {
+            const [rows] = await pool.promise().query(
+                `SELECT ur.id as asignacion_id, ur.usuario_id, ur.rutina_id, r.nombre as rutina_nombre, ur.fecha_inicio, ur.fecha_fin, ur.estado, ur.progreso
+                 FROM usuarios_rutinas ur
+                 JOIN rutinas r ON ur.rutina_id = r.id
+                 WHERE ur.usuario_id = ?
+                 ORDER BY ur.fecha_inicio DESC`,
+                [id]
+            );
+            res.json(rows);
+        } catch (error) {
+            res.status(500).json({ error: error.message });
+        }
+    });
+
+    // Actualizar asignación (por ejemplo cambiar estado o progreso)
+    app.put('/usuarios/:usuarioId/rutinas/:asignacionId', async (req, res) => {
+        const { usuarioId, asignacionId } = req.params;
+        const { fecha_fin, estado, progreso } = req.body;
+        try {
+            const [result] = await pool.promise().query(
+                'UPDATE usuarios_rutinas SET fecha_fin = ?, estado = ?, progreso = ? WHERE id = ? AND usuario_id = ?',
+                [fecha_fin || null, estado || null, progreso || null, asignacionId, usuarioId]
+            );
+            if (result.affectedRows > 0) res.json({ success: true });
+            else res.status(404).json({ success: false, message: 'Asignación no encontrada' });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
+    });
+
 // Inicia el servidor en el puerto especificado
 // El servidor quedará escuchando peticiones HTTP
 app.listen(port, () => {
@@ -289,4 +482,16 @@ app.listen(port, () => {
     console.log('- PUT /productos/:id (actualizar producto)')
     console.log('- DELETE /productos/:id (eliminar producto)')
     console.log('- GET /productos/:id/ganancia (calcular ganancia por producto)')
+    console.log('- GET /rutinas (listado de rutinas)')
+    console.log('- POST /rutinas (crear rutina) {nombre, descripcion, nivel, objetivo, duracion_semanas, frecuencia_por_semana}')
+    console.log('- PUT /rutinas/:id (actualizar rutina)')
+    console.log('- DELETE /rutinas/:id (eliminar rutina)')
+    console.log('- POST /rutinas/:id/ejercicios (agregar ejercicio a rutina)')
+    console.log('- PUT /rutinas/ejercicios/:id (actualizar ejercicio)')
+    console.log('- DELETE /rutinas/ejercicios/:id (eliminar ejercicio)')
+    console.log('- GET /ejercicios (listado de ejercicios)')
+    console.log('- POST /ejercicios (crear ejercicio) {nombre, descripcion, grupo_muscular, equipo, tipo}')
+    console.log('- GET /usuarios/:id/rutinas (listado de rutinas asignadas a un usuario)')
+    console.log('- POST /usuarios/:id/rutinas (asignar una rutina a un usuario)')
+    console.log('- PUT /usuarios/:usuarioId/rutinas/:asignacionId (actualizar asignación)')
 })
