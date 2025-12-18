@@ -29,6 +29,7 @@ SET time_zone = "+00:00";
 
 CREATE TABLE `usuarios` (
   `id` int(150) NOT NULL,
+  `nombre` varchar(150) NOT NULL,
   `email` varchar(120) NOT NULL,
   `password` int(150) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -37,12 +38,12 @@ CREATE TABLE `usuarios` (
 -- Volcado de datos para la tabla `usuarios`
 --
 
-INSERT INTO `usuarios` (`id`, `email`, `password`) VALUES
-(1, 'sebastiansg0428@gmail.com', 123456),
-(7, 'admin@gmail.com', 123456),
-(8, 'admin2@gmail.com', 123456),
-(9, 'admin1@gmail.com', 123456),
-(11, 'admin3@gmail.com', 123456);
+INSERT INTO `usuarios` (`id`, `nombre`, `email`, `password`) VALUES
+(1, 'Sebastián', 'sebastiansg0428@gmail.com', 123456),
+(7, 'Admin', 'admin@gmail.com', 123456),
+(8, 'Admin2', 'admin2@gmail.com', 123456),
+(9, 'Admin1', 'admin1@gmail.com', 123456),
+(11, 'Admin3', 'admin3@gmail.com', 123456);
 
 --
 -- Índices para tablas volcadas
