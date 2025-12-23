@@ -1,542 +1,317 @@
-// Importación de dependencias necesarias
-const express = require('express') // Framework web para Node.js
-const mysql = require('mysql2'); // Driver de MySQL para Node.js
-const cors = require('cors'); // Middleware para permitir peticiones cross-origin
+const express = require('express');
+const mysql = require('mysql2');
+const cors = require('cors');
 
-// Inicialización de la aplicación Express
-const app = express()
+const app = express();
+const port = 3001;
 
-app.use(express.json()); // Permitir peticiones JSON
+// Middlewares
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public'));
 
-// Middleware para permitir peticiones desde React
-app.use(cors())
-app.use(express.json()) // Para parsear JSON en el body
-app.use(express.static('public')) // Servir archivos estáticos
-const port = 3001 // Puerto donde correrá el servidor
-
-// Configuración del pool de conexiones a la base de datos MySQL
-// Un pool permite reutilizar conexiones y mejorar el rendimiento
+// Configuración de base de datos
 const pool = mysql.createPool({
-    host: 'localhost', // Servidor de base de datos
-    user: 'root',      // Usuario de MySQL
-    database: 'meli',  // Nombre de la base de datos
+    host: 'localhost',
+    user: 'root',
+    database: 'meli',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 });
 
+// ==================== USUARIOS ====================
 
-
-// Endpoint para el login de usuarios
-// Método POST: enviar JSON { email: string, password: string }
+// Login
 app.post('/login', async (req, res) => {
-    // Extrae email y password del body (JSON)
-    const { email, password } = req.body
-
-    console.log('=== LOGIN ATTEMPT ===')
-    console.log('Email:', email)
-    console.log('Password:', password)
-
+    const { email, password } = req.body;
+    
     try {
-        // Primero buscar si el email existe
-        const [emailCheck] = await pool.promise()
-            .query('SELECT `id`, `email`, `password` FROM `usuarios` WHERE email = ?', [email]);
+        const [rows] = await pool.promise().query(
+            'SELECT id, nombre, apellido, email, membresia, estado, fecha_vencimiento FROM usuarios WHERE email = ? AND password = ? AND estado = "activo"',
+            [email, password]
+        );
 
-        console.log('Email found:', emailCheck.length > 0)
-        if (emailCheck.length > 0) {
-            console.log('Stored password:', emailCheck[0].password)
-            console.log('Provided password:', password)
-            console.log('Passwords match:', emailCheck[0].password === password)
+        if (rows.length === 0) {
+            return res.status(401).json({ success: false, message: 'Credenciales inválidas' });
         }
 
-        // Consulta a la base de datos para verificar las credenciales
-        // Usa prepared statements (?) para prevenir inyección SQL
-        const [rows] = await pool.promise()
-            .query('SELECT `id`, `email`, `password` FROM `usuarios` WHERE email = ? AND password = ?', [email, password]);
+        const user = rows[0];
+        
+        // Actualizar última visita
+        await pool.promise().query(
+            'UPDATE usuarios SET ultima_visita = NOW(), total_visitas = total_visitas + 1 WHERE id = ?',
+            [user.id]
+        );
 
-        console.log('Login result:', rows.length > 0 ? 'SUCCESS' : 'FAILED')
-        console.log('=====================')
-
-        // Verifica si se encontró algún usuario con esas credenciales
-        if (rows.length > 0) {
-            res.send('login successful') // Usuario encontrado
-        } else {
-            res.send('invalid credentials') // Credenciales incorrectas
-        }
+        res.json({ success: true, user });
     } catch (error) {
-        console.log('Database error:', error.message)
-        res.send('database error') // Error de base de datos
+        res.status(500).json({ success: false, message: 'Error del servidor' });
     }
-})
+});
 
-// Endpoint para el registro de nuevos usuarios
-// Método POST: enviar JSON { email: string, password: string }
+// Registro
 app.post('/register', async (req, res) => {
-    // Extrae email y password del body (JSON)
-    const { email, password } = req.body
+    const { nombre, apellido, email, password, telefono, fecha_nacimiento, genero, membresia = 'basica' } = req.body;
 
-    console.log('=== REGISTER ATTEMPT ===')
-    console.log('Email:', email)
-    console.log('Password:', password)
-
-    try {
-        // Inserta un nuevo usuario en la base de datos
-        // Usa prepared statements (?) para seguridad
-        const [rows] = await pool.promise()
-            .query('INSERT INTO `usuarios` (`email`, `password`) VALUES (?, ?)', [email, password]);
-
-        console.log('Register result: SUCCESS')
-        console.log('=====================')
-
-        // Verifica si la inserción fue exitosa
-        if (rows.affectedRows > 0) {
-            res.send('register successful') // Usuario creado exitosamente
-        } else {
-            res.send('register failed') // Error al crear usuario
-        }
-    } catch (error) {
-        console.log('Register error:', error.message)
-        console.log('=====================')
-        if (error.code === 'ER_DUP_ENTRY') {
-            res.send('email already exists') // Email ya existe
-        } else {
-            res.send('register failed') // Otro error
-        }
+    if (!nombre || !email || !password) {
+        return res.status(400).json({ success: false, message: 'Nombre, email y password son requeridos' });
     }
-})
 
-// Endpoint para ver todos los usuarios
-app.get('/usuarios/', async (req, res) => {
+    const precios = { basica: 30.00, premium: 50.00, vip: 80.00 };
+    const precio_membresia = precios[membresia] || 30.00;
+    const fecha_vencimiento = new Date();
+    fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1);
+
     try {
-        const [rows] = await pool.promise()
-            .query('SELECT `id`, `email`, DATE_FORMAT(created_at, "%d/%m/%Y %H:%i") as fecha_registro FROM `usuarios` ORDER BY id DESC');
+        const [result] = await pool.promise().query(
+            `INSERT INTO usuarios (nombre, apellido, email, password, telefono, fecha_nacimiento, genero, membresia, precio_membresia, fecha_vencimiento, ultima_visita) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [nombre, apellido, email, password, telefono, fecha_nacimiento, genero, membresia, precio_membresia, fecha_vencimiento]
+        );
+
+        res.status(201).json({ 
+            success: true, 
+            id: result.insertId,
+            message: 'Usuario registrado exitosamente'
+        });
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ success: false, message: 'El email ya existe' });
+        }
+        res.status(500).json({ success: false, message: 'Error del servidor' });
+    }
+});
+
+// Listar usuarios
+app.get('/usuarios', async (req, res) => {
+    const { estado, membresia, vencidos } = req.query;
+    
+    let query = `
+        SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.membresia, u.estado, 
+               u.precio_membresia, u.total_visitas,
+               DATE_FORMAT(u.ultima_visita, "%d/%m/%Y %H:%i") as ultima_visita,
+               DATE_FORMAT(u.fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
+               DATE_FORMAT(u.created_at, "%d/%m/%Y") as fecha_registro,
+               CASE WHEN u.fecha_vencimiento < CURDATE() THEN 'vencida' ELSE 'vigente' END as estado_membresia
+        FROM usuarios u WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    if (estado) {
+        query += ' AND u.estado = ?';
+        params.push(estado);
+    }
+    
+    if (membresia) {
+        query += ' AND u.membresia = ?';
+        params.push(membresia);
+    }
+    
+    if (vencidos === 'true') {
+        query += ' AND u.fecha_vencimiento < CURDATE()';
+    }
+    
+    query += ' ORDER BY u.id DESC';
+
+    try {
+        const [rows] = await pool.promise().query(query, params);
         res.json(rows);
     } catch (error) {
-        // Si no existe la columna created_at, usar consulta simple
-        try {
-            const [simpleRows] = await pool.promise()
-                .query('SELECT `id`, `email` FROM `usuarios` ORDER BY id DESC');
-            res.json(simpleRows);
-        } catch (simpleError) {
-            res.json({ error: simpleError.message });
-        }
+        res.status(500).json({ error: error.message });
     }
-})
+});
 
-// Endpoint para ver un usuario por ID
+// Ver usuario individual
 app.get('/usuarios/:id', async (req, res) => {
     const { id } = req.params;
-    // Validar que el id sea numérico
-    if (!/^[0-9]+$/.test(id)) {
-        return res.status(400).json({ error: 'ID inválido' });
-    }
-
+    
     try {
-        // Intentar devolver la fecha formateada si la columna existe
-        const [rows] = await pool.promise().query(
-            'SELECT id, email, DATE_FORMAT(created_at, "%d/%m/%Y %H:%i") as fecha_registro FROM usuarios WHERE id = ?',
-            [id]
+        const [userRows] = await pool.promise().query(
+            `SELECT u.*, DATE_FORMAT(u.ultima_visita, "%d/%m/%Y %H:%i") as ultima_visita_formatted,
+                    DATE_FORMAT(u.fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento_formatted,
+                    CASE WHEN u.fecha_vencimiento < CURDATE() THEN 'vencida' ELSE 'vigente' END as estado_membresia
+             FROM usuarios u WHERE u.id = ?`, [id]
         );
-
-        if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
-        return res.json(rows[0]);
-    } catch (error) {
-        // Si la columna created_at no existe, hacer un fallback a una consulta simple
-        if (error && error.code === 'ER_BAD_FIELD_ERROR') {
-            try {
-                const [rows] = await pool.promise().query('SELECT id, email FROM usuarios WHERE id = ?', [id]);
-                if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
-                return res.json(rows[0]);
-            } catch (err2) {
-                return res.status(500).json({ error: err2.message });
-            }
+        
+        if (userRows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
         }
-        return res.status(500).json({ error: error.message });
+
+        res.json(userRows[0]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
-
-
-// 🆕 Eliminar usuario por ID (nuevo endpoint)
-app.delete('/usuarios/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        const [result] = await pool.promise().query('DELETE FROM usuarios WHERE id = ?', [id]);
-        if (result.affectedRows > 0) {
-            res.json({ success: true });
-        } else {
-            res.json({ success: false, message: 'Usuario no encontrado' });
-        }
-    } catch (error) {
-        res.json({ success: false, message: error.message });
-    }
-});
-
-// Crear usuario (equivalente a /register, ruta genérica para API)
-app.post('/usuarios', async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ success: false, message: 'email y password son requeridos' });
-    try {
-        const [rows] = await pool.promise().query('INSERT INTO `usuarios` (`email`, `password`) VALUES (?, ?)', [email, password]);
-        if (rows.affectedRows > 0) {
-            return res.status(201).json({ success: true, id: rows.insertId });
-        }
-        return res.status(500).json({ success: false, message: 'no se pudo crear usuario' });
-    } catch (error) {
-        if (error && error.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'email ya existe' });
-        return res.status(500).json({ success: false, message: error.message });
-    }
-});
-
-// Actualizar usuario (email y/o password)
+// Actualizar usuario
 app.put('/usuarios/:id', async (req, res) => {
     const { id } = req.params;
-    if (!/^[0-9]+$/.test(id)) return res.status(400).json({ success: false, message: 'ID inválido' });
-    const { email, password } = req.body;
+    const { nombre, apellido, email, telefono, fecha_nacimiento, genero, membresia } = req.body;
+    
     const updates = [];
     const values = [];
-    if (email) { updates.push('email = ?'); values.push(email); }
-    if (password) { updates.push('password = ?'); values.push(password); }
-    if (updates.length === 0) return res.status(400).json({ success: false, message: 'Nada para actualizar' });
-    values.push(id);
-    try {
-        const [result] = await pool.promise().query(`UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`, values);
-        if (result.affectedRows > 0) return res.json({ success: true });
-        return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
-    } catch (error) {
-        if (error && error.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'email ya existe' });
-        return res.status(500).json({ success: false, message: error.message });
-    }
-});
-
-// -----------------------
-// Endpoints para productos
-// -----------------------
-
-// Listar productos
-app.get('/productos', async (req, res) => {
-    try {
-        const [rows] = await pool.promise()
-            .query('SELECT `id`, `nombre`, `descripcion`, `categoria`, `stock`, `precio_compra`, `precio_venta`, DATE_FORMAT(created_at, "%d/%m/%Y %H:%i") as fecha_creacion FROM `productos` ORDER BY id DESC');
-        res.json(rows);
-    } catch (error) {
-        try {
-            const [simpleRows] = await pool.promise()
-                .query('SELECT `id`, `nombre`, `descripcion`, `categoria`, `stock`, `precio_compra`, `precio_venta` FROM `productos` ORDER BY id DESC');
-            res.json(simpleRows);
-        } catch (simpleError) {
-            res.json({ error: simpleError.message });
-        }
-    }
-});
-
-// Obtener producto por id
-app.get('/productos/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        const [rows] = await pool.promise().query('SELECT * FROM productos WHERE id = ?', [id]);
-        if (rows.length > 0) res.json(rows[0]);
-        else res.json({ error: 'Producto no encontrado' });
-    } catch (error) {
-        res.json({ error: error.message });
-    }
-});
-
-// Crear producto
-app.post('/productos', async (req, res) => {
-    const { nombre, descripcion, categoria, stock, precio_compra, precio_venta } = req.body;
-    try {
-        const [result] = await pool.promise().query(
-            'INSERT INTO productos (nombre, descripcion, categoria, stock, precio_compra, precio_venta) VALUES (?, ?, ?, ?, ?, ?)',
-            [nombre, descripcion || null, categoria || null, stock || 0, precio_compra || 0, precio_venta || 0]
-        );
-        if (result.affectedRows > 0) {
-            res.json({ success: true, id: result.insertId });
-        } else {
-            res.json({ success: false });
-        }
-    } catch (error) {
-        res.json({ success: false, message: error.message });
-    }
-});
-
-// Actualizar producto
-app.put('/productos/:id', async (req, res) => {
-    const { id } = req.params;
-    const { nombre, descripcion, categoria, stock, precio_compra, precio_venta } = req.body;
-    try {
-        const [result] = await pool.promise().query(
-            'UPDATE productos SET nombre = ?, descripcion = ?, categoria = ?, stock = ?, precio_compra = ?, precio_venta = ? WHERE id = ?',
-            [nombre, descripcion || null, categoria || null, stock || 0, precio_compra || 0, precio_venta || 0, id]
-        );
-        if (result.affectedRows > 0) res.json({ success: true });
-        else res.json({ success: false, message: 'Producto no encontrado' });
-    } catch (error) {
-        res.json({ success: false, message: error.message });
-    }
-});
-
-// Eliminar producto
-app.delete('/productos/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        const [result] = await pool.promise().query('DELETE FROM productos WHERE id = ?', [id]);
-        if (result.affectedRows > 0) {
-            res.json({ success: true });
-        } else {
-            res.json({ success: false, message: 'Producto no encontrado' });
-        }
-    } catch (error) {
-        res.json({ success: false, message: error.message });
-    }
-});
-
-// Calcular ganancia por producto (por unidad y total según stock)
-app.get('/productos/:id/ganancia', async (req, res) => {
-    const { id } = req.params;
-    try {
-        const [rows] = await pool.promise().query('SELECT precio_compra, precio_venta, stock FROM productos WHERE id = ?', [id]);
-        if (rows.length === 0) return res.json({ error: 'Producto no encontrado' });
-        const { precio_compra, precio_venta, stock } = rows[0];
-        const unidad_compra = parseFloat(precio_compra);
-        const unidad_venta = parseFloat(precio_venta);
-        const ganancia_unitaria = unidad_venta - unidad_compra;
-        const ganancia_total = ganancia_unitaria * (Number(stock) || 0);
-        res.json({ ganancia_unitaria: ganancia_unitaria.toFixed(2), ganancia_total: ganancia_total.toFixed(2), stock: Number(stock) });
-    } catch (error) {
-        res.json({ error: error.message });
-    }
-});
-
-
-
-
-
-    // -----------------------
-    // Endpoints para rutinas y ejercicios
-    // -----------------------
-
-    // Listar todas las rutinas
-    app.get('/rutinas', async (req, res) => {
-        try {
-            const [rows] = await pool.promise().query('SELECT * FROM rutinas ORDER BY id DESC');
-            res.json(rows);
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-    });
-
-    // Obtener una rutina por id, incluyendo ejercicios ordenados
-    app.get('/rutinas/:id', async (req, res) => {
-        const { id } = req.params;
-        try {
-            const [rutinas] = await pool.promise().query('SELECT * FROM rutinas WHERE id = ?', [id]);
-            if (rutinas.length === 0) return res.status(404).json({ error: 'Rutina no encontrada' });
-
-            const [ejercicios] = await pool.promise().query(
-                `SELECT re.id as re_id, e.id as ejercicio_id, e.nombre, e.grupo_muscular, e.equipo, e.tipo, re.orden, re.series, re.repeticiones_min, re.repeticiones_max, re.descanso_seg, re.peso_kg, re.notas
-                 FROM rutina_ejercicios re
-                 JOIN ejercicios e ON re.ejercicio_id = e.id
-                 WHERE re.rutina_id = ?
-                 ORDER BY re.orden ASC`,
-                [id]
-            );
-
-            res.json({ rutina: rutinas[0], ejercicios });
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-    });
-
-    // Crear una nueva rutina
-    app.post('/rutinas', async (req, res) => {
-        const { nombre, descripcion, nivel, objetivo, duracion_semanas, frecuencia_por_semana } = req.body;
-        try {
-            const [result] = await pool.promise().query(
-                'INSERT INTO rutinas (nombre, descripcion, nivel, objetivo, duracion_semanas, frecuencia_por_semana) VALUES (?, ?, ?, ?, ?, ?)',
-                [nombre, descripcion || null, nivel || null, objetivo || null, duracion_semanas || null, frecuencia_por_semana || null]
-            );
-            res.json({ success: true, id: result.insertId });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-    // Actualizar rutina
-    app.put('/rutinas/:id', async (req, res) => {
-        const { id } = req.params;
-        const { nombre, descripcion, nivel, objetivo, duracion_semanas, frecuencia_por_semana } = req.body;
-        try {
-            const [result] = await pool.promise().query(
-                'UPDATE rutinas SET nombre = ?, descripcion = ?, nivel = ?, objetivo = ?, duracion_semanas = ?, frecuencia_por_semana = ? WHERE id = ?',
-                [nombre, descripcion || null, nivel || null, objetivo || null, duracion_semanas || null, frecuencia_por_semana || null, id]
-            );
-            if (result.affectedRows > 0) res.json({ success: true });
-            else res.status(404).json({ success: false, message: 'Rutina no encontrada' });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-    // Eliminar rutina
-    app.delete('/rutinas/:id', async (req, res) => {
-        const { id } = req.params;
-        try {
-            const [result] = await pool.promise().query('DELETE FROM rutinas WHERE id = ?', [id]);
-            if (result.affectedRows > 0) res.json({ success: true });
-            else res.status(404).json({ success: false, message: 'Rutina no encontrada' });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-    // Añadir ejercicio a una rutina
-    app.post('/rutinas/:id/ejercicios', async (req, res) => {
-        const { id } = req.params; // rutina id
-        const { ejercicio_id, orden, series, repeticiones_min, repeticiones_max, descanso_seg, peso_kg, notas } = req.body;
-        try {
-            const [result] = await pool.promise().query(
-                'INSERT INTO rutina_ejercicios (rutina_id, ejercicio_id, orden, series, repeticiones_min, repeticiones_max, descanso_seg, peso_kg, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [id, ejercicio_id, orden || 0, series || null, repeticiones_min || null, repeticiones_max || null, descanso_seg || null, peso_kg || null, notas || null]
-            );
-            res.json({ success: true, id: result.insertId });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-    // Actualizar una entrada rutina_ejercicios
-    app.put('/rutinas/ejercicios/:id', async (req, res) => {
-        const { id } = req.params;
-        const { orden, series, repeticiones_min, repeticiones_max, descanso_seg, peso_kg, notas } = req.body;
-        try {
-            const [result] = await pool.promise().query(
-                'UPDATE rutina_ejercicios SET orden = ?, series = ?, repeticiones_min = ?, repeticiones_max = ?, descanso_seg = ?, peso_kg = ?, notas = ? WHERE id = ?',
-                [orden || 0, series || null, repeticiones_min || null, repeticiones_max || null, descanso_seg || null, peso_kg || null, notas || null, id]
-            );
-            if (result.affectedRows > 0) res.json({ success: true });
-            else res.status(404).json({ success: false, message: 'Entrada no encontrada' });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-    // Eliminar ejercicio de una rutina (entrada)
-    app.delete('/rutinas/ejercicios/:id', async (req, res) => {
-        const { id } = req.params;
-        try {
-            const [result] = await pool.promise().query('DELETE FROM rutina_ejercicios WHERE id = ?', [id]);
-            if (result.affectedRows > 0) res.json({ success: true });
-            else res.status(404).json({ success: false, message: 'Entrada no encontrada' });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-    // CRUD para ejercicios
-    app.get('/ejercicios', async (req, res) => {
-        try {
-            const [rows] = await pool.promise().query('SELECT * FROM ejercicios ORDER BY id DESC');
-            res.json(rows);
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-    });
-
-    app.post('/ejercicios', async (req, res) => {
-        const { nombre, descripcion, grupo_muscular, equipo, tipo } = req.body;
-        try {
-            const [result] = await pool.promise().query(
-                'INSERT INTO ejercicios (nombre, descripcion, grupo_muscular, equipo, tipo) VALUES (?, ?, ?, ?, ?)',
-                [nombre, descripcion || null, grupo_muscular || null, equipo || null, tipo || null]
-            );
-            res.json({ success: true, id: result.insertId });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-    // Asignar una rutina a un usuario
-    app.post('/usuarios/:id/rutinas', async (req, res) => {
-        const { id } = req.params; // usuario id
-        const { rutina_id, fecha_inicio, fecha_fin, estado, progreso } = req.body;
-        try {
-            const [result] = await pool.promise().query(
-                'INSERT INTO usuarios_rutinas (usuario_id, rutina_id, fecha_inicio, fecha_fin, estado, progreso) VALUES (?, ?, ?, ?, ?, ?)',
-                [id, rutina_id, fecha_inicio || new Date(), fecha_fin || null, estado || 'activa', progreso || null]
-            );
-            res.json({ success: true, id: result.insertId });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-    // Listar rutinas asignadas a un usuario
-    app.get('/usuarios/:id/rutinas', async (req, res) => {
-        const { id } = req.params;
-        try {
-            const [rows] = await pool.promise().query(
-                `SELECT ur.id as asignacion_id, ur.usuario_id, ur.rutina_id, r.nombre as rutina_nombre, ur.fecha_inicio, ur.fecha_fin, ur.estado, ur.progreso
-                 FROM usuarios_rutinas ur
-                 JOIN rutinas r ON ur.rutina_id = r.id
-                 WHERE ur.usuario_id = ?
-                 ORDER BY ur.fecha_inicio DESC`,
-                [id]
-            );
-            res.json(rows);
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-    });
-
-    // Actualizar asignación (por ejemplo cambiar estado o progreso)
-    app.put('/usuarios/:usuarioId/rutinas/:asignacionId', async (req, res) => {
-        const { usuarioId, asignacionId } = req.params;
-        const { fecha_fin, estado, progreso } = req.body;
-        try {
-            const [result] = await pool.promise().query(
-                'UPDATE usuarios_rutinas SET fecha_fin = ?, estado = ?, progreso = ? WHERE id = ? AND usuario_id = ?',
-                [fecha_fin || null, estado || null, progreso || null, asignacionId, usuarioId]
-            );
-            if (result.affectedRows > 0) res.json({ success: true });
-            else res.status(404).json({ success: false, message: 'Asignación no encontrada' });
-        } catch (error) {
-            res.status(500).json({ success: false, message: error.message });
-        }
-    });
-
-// Inicia el servidor en el puerto especificado
-// El servidor quedará escuchando peticiones HTTP
-app.listen(port, () => {
-    console.log(`Servidor corriendo en http://localhost:${port}`)
-    console.log('Páginas disponibles:')
-    console.log('- http://localhost:3001/ (Login/Registro)')
-    console.log('- http://localhost:3001/home.html (Home con usuarios)')
-    console.log('Endpoints API:')
-    console.log('- POST /login (body JSON: { email, password })')
-    console.log('- POST /register (body JSON: { email, password })')
-    console.log('- GET /usuarios (listado de usuarios)')
-    console.log('- GET /usuarios/:id (usuario por id)')
-    console.log('- DELETE /usuarios/:id (eliminar usuario)')
-    console.log('- POST /usuarios (crear usuario) {email, password}')
-    console.log('- PUT /usuarios/:id (actualizar usuario)')
-    console.log('- POST /usuarios/:id/rutinas (agregar rutina a usuario)')
-    console.log('- PUT /usuarios/:usuarioId/rutinas/:asignacionId (actualizar asignación)')
-    console.log('- GET /usuarios/:id/rutinas (listado de rutinas asignadas a un usuario)')
     
-    console.log('- GET /productos (listado de productos)')
-    console.log('- GET /productos/:id (producto por id)')
-    console.log('- POST /productos (crear producto) {nombre, descripcion, categoria, stock, precio_compra, precio_venta}')
-    console.log('- PUT /productos/:id (actualizar producto)')
-    console.log('- DELETE /productos/:id (eliminar producto)')
-    console.log('- GET /productos/:id/ganancia (calcular ganancia por producto)')
-    console.log('- GET /rutinas (listado de rutinas)')
-    console.log('- POST /rutinas (crear rutina) {nombre, descripcion, nivel, objetivo, duracion_semanas, frecuencia_por_semana}')
-    console.log('- PUT /rutinas/:id (actualizar rutina)')
-    console.log('- DELETE /rutinas/:id (eliminar rutina)')
-    console.log('- POST /rutinas/:id/ejercicios (agregar ejercicio a rutina)')
-    console.log('- PUT /rutinas/ejercicios/:id (actualizar ejercicio)')
-    console.log('- DELETE /rutinas/ejercicios/:id (eliminar ejercicio)')
-    console.log('- GET /ejercicios (listado de ejercicios)')
-    console.log('- POST /ejercicios (crear ejercicio) {nombre, descripcion, grupo_muscular, equipo, tipo}')
-    console.log('- GET /usuarios/:id/rutinas (listado de rutinas asignadas a un usuario)')
-    console.log('- POST /usuarios/:id/rutinas (asignar una rutina a un usuario)')
-    console.log('- PUT /usuarios/:usuarioId/rutinas/:asignacionId (actualizar asignación)')
-})
+    if (nombre) { updates.push('nombre = ?'); values.push(nombre); }
+    if (apellido) { updates.push('apellido = ?'); values.push(apellido); }
+    if (email) { updates.push('email = ?'); values.push(email); }
+    if (telefono) { updates.push('telefono = ?'); values.push(telefono); }
+    if (fecha_nacimiento) { updates.push('fecha_nacimiento = ?'); values.push(fecha_nacimiento); }
+    if (genero) { updates.push('genero = ?'); values.push(genero); }
+    if (membresia) { 
+        updates.push('membresia = ?', 'precio_membresia = ?'); 
+        values.push(membresia);
+        const precios = { basica: 30.00, premium: 50.00, vip: 80.00 };
+        values.push(precios[membresia] || 30.00);
+    }
+    
+    if (updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+    }
+    
+    values.push(id);
+
+    try {
+        const [result] = await pool.promise().query(
+            `UPDATE usuarios SET ${updates.join(', ')}, updated_at = NOW() WHERE id = ?`, 
+            values
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+        }
+        
+        res.json({ success: true, message: 'Usuario actualizado correctamente' });
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ success: false, message: 'Email ya existe' });
+        }
+        res.status(500).json({ success: false, message: 'Error al actualizar usuario' });
+    }
+});
+
+// Cambiar estado de usuario
+app.put('/usuarios/:id/estado', async (req, res) => {
+    const { id } = req.params;
+    const { estado } = req.body;
+    
+    if (!['activo', 'inactivo', 'suspendido'].includes(estado)) {
+        return res.status(400).json({ success: false, message: 'Estado inválido' });
+    }
+    
+    try {
+        const [result] = await pool.promise().query(
+            'UPDATE usuarios SET estado = ? WHERE id = ?', [estado, id]
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+        }
+        
+        res.json({ success: true, message: `Usuario ${estado}` });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al cambiar estado' });
+    }
+});
+
+// Eliminar usuario
+app.delete('/usuarios/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [result] = await pool.promise().query('DELETE FROM usuarios WHERE id = ?', [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+        }
+        
+        res.json({ success: true, message: 'Usuario eliminado correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al eliminar usuario' });
+    }
+});
+
+// Registrar visita
+app.post('/usuarios/:id/visita', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        // Verificar usuario activo y membresía vigente
+        const [user] = await pool.promise().query(
+            'SELECT nombre, estado, fecha_vencimiento FROM usuarios WHERE id = ? AND estado = "activo"',
+            [id]
+        );
+        
+        if (user.length === 0) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado o inactivo' });
+        }
+        
+        if (new Date(user[0].fecha_vencimiento) < new Date()) {
+            return res.status(403).json({ success: false, message: 'Membresía vencida' });
+        }
+        
+        // Actualizar visita
+        await pool.promise().query(
+            'UPDATE usuarios SET ultima_visita = NOW(), total_visitas = total_visitas + 1 WHERE id = ?',
+            [id]
+        );
+        
+        res.json({ 
+            success: true, 
+            message: `Bienvenido ${user[0].nombre}` 
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al registrar visita' });
+    }
+});
+
+// Estadísticas
+app.get('/usuarios/estadisticas', async (req, res) => {
+    try {
+        const [stats] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_usuarios,
+                SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as usuarios_activos,
+                SUM(CASE WHEN estado = 'inactivo' THEN 1 ELSE 0 END) as usuarios_inactivos,
+                SUM(CASE WHEN estado = 'suspendido' THEN 1 ELSE 0 END) as usuarios_suspendidos,
+                SUM(CASE WHEN membresia = 'basica' THEN 1 ELSE 0 END) as membresia_basica,
+                SUM(CASE WHEN membresia = 'premium' THEN 1 ELSE 0 END) as membresia_premium,
+                SUM(CASE WHEN membresia = 'vip' THEN 1 ELSE 0 END) as membresia_vip,
+                SUM(CASE WHEN fecha_vencimiento < CURDATE() THEN 1 ELSE 0 END) as membresias_vencidas,
+                COUNT(CASE WHEN DATE(ultima_visita) = CURDATE() THEN 1 END) as visitas_hoy,
+                SUM(precio_membresia) as ingresos_mensuales_potenciales,
+                AVG(total_visitas) as promedio_visitas_usuario
+            FROM usuarios
+        `);
+        
+        const [visitasSemanales] = await pool.promise().query(`
+            SELECT COUNT(*) as visitas_semana
+            FROM usuarios 
+            WHERE ultima_visita >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        `);
+        
+        res.json({
+            ...stats[0],
+            visitas_semana: visitasSemanales[0].visitas_semana
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Iniciar servidor
+app.listen(port, () => {
+    console.log(`🏋️ Sistema de Gimnasio corriendo en http://localhost:${port}`);
+    console.log('\n📋 ENDPOINTS DISPONIBLES:');
+    console.log('👤 USUARIOS:');
+    console.log('  POST /login - Iniciar sesión');
+    console.log('  POST /register - Registrar usuario');
+    console.log('  GET /usuarios - Listar usuarios (filtros: ?estado=activo&membresia=premium&vencidos=true)');
+    console.log('  GET /usuarios/:id - Ver usuario individual');
+    console.log('  PUT /usuarios/:id - Actualizar usuario');
+    console.log('  PUT /usuarios/:id/estado - Cambiar estado');
+    console.log('  DELETE /usuarios/:id - Eliminar usuario');
+    console.log('  POST /usuarios/:id/visita - Registrar visita');
+    console.log('  GET /usuarios/estadisticas - Estadísticas del gimnasio');
+});
