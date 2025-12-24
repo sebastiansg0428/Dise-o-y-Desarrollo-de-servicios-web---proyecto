@@ -562,6 +562,579 @@ app.get('/ventas', async (req, res) => {
     }
 });
 
+// ==================== EJERCICIOS ====================
+
+// Listar ejercicios
+app.get('/ejercicios', async (req, res) => {
+    const { grupo_muscular, tipo, nivel, estado } = req.query;
+    
+    let query = `
+        SELECT id, nombre, descripcion, grupo_muscular, tipo, nivel, equipo, 
+               calorias_x_minuto, video_url, estado,
+               DATE_FORMAT(created_at, "%d/%m/%Y") as fecha_creacion
+        FROM ejercicios WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    if (grupo_muscular) {
+        query += ' AND grupo_muscular = ?';
+        params.push(grupo_muscular);
+    }
+    
+    if (tipo) {
+        query += ' AND tipo = ?';
+        params.push(tipo);
+    }
+    
+    if (nivel) {
+        query += ' AND nivel = ?';
+        params.push(nivel);
+    }
+    
+    if (estado) {
+        query += ' AND estado = ?';
+        params.push(estado);
+    } else {
+        query += ' AND estado = "activo"';
+    }
+    
+    query += ' ORDER BY grupo_muscular, nombre';
+
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ver ejercicio individual
+app.get('/ejercicios/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [rows] = await pool.promise().query(
+            'SELECT * FROM ejercicios WHERE id = ?', [id]
+        );
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Ejercicio no encontrado' });
+        }
+        
+        res.json(rows[0]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Crear ejercicio
+app.post('/ejercicios', async (req, res) => {
+    const { nombre, descripcion, grupo_muscular, tipo, nivel, equipo, video_url, calorias_x_minuto } = req.body;
+    
+    if (!nombre || !grupo_muscular) {
+        return res.status(400).json({ success: false, message: 'Nombre y grupo muscular son requeridos' });
+    }
+
+    try {
+        const [result] = await pool.promise().query(
+            `INSERT INTO ejercicios (nombre, descripcion, grupo_muscular, tipo, nivel, equipo, video_url, calorias_x_minuto) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [nombre, descripcion, grupo_muscular, tipo || 'fuerza', nivel || 'principiante', equipo, video_url, calorias_x_minuto || 5.00]
+        );
+
+        res.status(201).json({ 
+            success: true, 
+            id: result.insertId,
+            message: 'Ejercicio creado exitosamente'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al crear ejercicio' });
+    }
+});
+
+// Actualizar ejercicio
+app.put('/ejercicios/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nombre, descripcion, grupo_muscular, tipo, nivel, equipo, video_url, calorias_x_minuto, estado } = req.body;
+    
+    const updates = [];
+    const values = [];
+    
+    if (nombre) { updates.push('nombre = ?'); values.push(nombre); }
+    if (descripcion) { updates.push('descripcion = ?'); values.push(descripcion); }
+    if (grupo_muscular) { updates.push('grupo_muscular = ?'); values.push(grupo_muscular); }
+    if (tipo) { updates.push('tipo = ?'); values.push(tipo); }
+    if (nivel) { updates.push('nivel = ?'); values.push(nivel); }
+    if (equipo) { updates.push('equipo = ?'); values.push(equipo); }
+    if (video_url) { updates.push('video_url = ?'); values.push(video_url); }
+    if (calorias_x_minuto !== undefined) { updates.push('calorias_x_minuto = ?'); values.push(calorias_x_minuto); }
+    if (estado) { updates.push('estado = ?'); values.push(estado); }
+    
+    if (updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+    }
+    
+    values.push(id);
+
+    try {
+        const [result] = await pool.promise().query(
+            `UPDATE ejercicios SET ${updates.join(', ')}, updated_at = NOW() WHERE id = ?`, 
+            values
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Ejercicio no encontrado' });
+        }
+        
+        res.json({ success: true, message: 'Ejercicio actualizado correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al actualizar ejercicio' });
+    }
+});
+
+// Eliminar ejercicio
+app.delete('/ejercicios/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [result] = await pool.promise().query('DELETE FROM ejercicios WHERE id = ?', [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Ejercicio no encontrado' });
+        }
+        
+        res.json({ success: true, message: 'Ejercicio eliminado correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al eliminar ejercicio' });
+    }
+});
+
+// ==================== RUTINAS ====================
+
+// Listar rutinas
+app.get('/rutinas', async (req, res) => {
+    const { objetivo, nivel, tipo, usuario_id } = req.query;
+    
+    let query = `
+        SELECT r.id, r.nombre, r.descripcion, r.objetivo, r.nivel, r.duracion_estimada,
+               r.frecuencia_semanal, r.tipo, r.usuario_id, r.popularidad, r.imagen_url, r.estado,
+               DATE_FORMAT(r.created_at, "%d/%m/%Y") as fecha_creacion,
+               COUNT(DISTINCT re.ejercicio_id) as total_ejercicios,
+               u.nombre as creador_nombre
+        FROM rutinas r
+        LEFT JOIN rutinas_ejercicios re ON r.id = re.rutina_id
+        LEFT JOIN usuarios u ON r.usuario_id = u.id
+        WHERE r.estado = 'activo'
+    `;
+    
+    const params = [];
+    
+    if (objetivo) {
+        query += ' AND r.objetivo = ?';
+        params.push(objetivo);
+    }
+    
+    if (nivel) {
+        query += ' AND r.nivel = ?';
+        params.push(nivel);
+    }
+    
+    if (tipo) {
+        query += ' AND r.tipo = ?';
+        params.push(tipo);
+    }
+    
+    if (usuario_id) {
+        query += ' AND r.usuario_id = ?';
+        params.push(usuario_id);
+    }
+    
+    query += ' GROUP BY r.id ORDER BY r.popularidad DESC, r.created_at DESC';
+
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ver rutina completa con ejercicios
+app.get('/rutinas/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        // Obtener información de la rutina
+        const [rutina] = await pool.promise().query(
+            `SELECT r.*, u.nombre as creador_nombre, u.email as creador_email
+             FROM rutinas r
+             LEFT JOIN usuarios u ON r.usuario_id = u.id
+             WHERE r.id = ?`, 
+            [id]
+        );
+        
+        if (rutina.length === 0) {
+            return res.status(404).json({ success: false, message: 'Rutina no encontrada' });
+        }
+        
+        // Obtener ejercicios de la rutina
+        const [ejercicios] = await pool.promise().query(
+            `SELECT 
+                re.id as rutina_ejercicio_id,
+                re.orden, re.series, re.repeticiones, re.descanso, re.peso_sugerido, re.notas,
+                e.id as ejercicio_id, e.nombre, e.descripcion, e.grupo_muscular, 
+                e.tipo, e.nivel, e.equipo, e.calorias_x_minuto, e.video_url
+             FROM rutinas_ejercicios re
+             INNER JOIN ejercicios e ON re.ejercicio_id = e.id
+             WHERE re.rutina_id = ?
+             ORDER BY re.orden`,
+            [id]
+        );
+        
+        res.json({
+            ...rutina[0],
+            ejercicios: ejercicios
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Crear rutina
+app.post('/rutinas', async (req, res) => {
+    const { 
+        nombre, descripcion, objetivo, nivel, duracion_estimada, 
+        frecuencia_semanal, usuario_id, tipo, imagen_url, ejercicios 
+    } = req.body;
+    
+    if (!nombre || !objetivo || !nivel) {
+        return res.status(400).json({ success: false, message: 'Nombre, objetivo y nivel son requeridos' });
+    }
+
+    try {
+        // Crear rutina
+        const [result] = await pool.promise().query(
+            `INSERT INTO rutinas (nombre, descripcion, objetivo, nivel, duracion_estimada, 
+             frecuencia_semanal, usuario_id, tipo, imagen_url) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [nombre, descripcion, objetivo, nivel, duracion_estimada || 60, 
+             frecuencia_semanal || 3, usuario_id || null, tipo || 'publica', imagen_url]
+        );
+
+        const rutina_id = result.insertId;
+
+        // Agregar ejercicios si se proporcionaron
+        if (ejercicios && Array.isArray(ejercicios) && ejercicios.length > 0) {
+            const values = ejercicios.map((ej, index) => [
+                rutina_id,
+                ej.ejercicio_id,
+                ej.orden || index + 1,
+                ej.series || 3,
+                ej.repeticiones || '12',
+                ej.descanso || 60,
+                ej.peso_sugerido || null,
+                ej.notas || null
+            ]);
+
+            await pool.promise().query(
+                `INSERT INTO rutinas_ejercicios 
+                (rutina_id, ejercicio_id, orden, series, repeticiones, descanso, peso_sugerido, notas) 
+                VALUES ?`,
+                [values]
+            );
+        }
+
+        res.status(201).json({ 
+            success: true, 
+            id: rutina_id,
+            message: 'Rutina creada exitosamente'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al crear rutina', error: error.message });
+    }
+});
+
+// Actualizar rutina (solo información básica)
+app.put('/rutinas/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nombre, descripcion, objetivo, nivel, duracion_estimada, frecuencia_semanal, imagen_url, estado } = req.body;
+    
+    const updates = [];
+    const values = [];
+    
+    if (nombre) { updates.push('nombre = ?'); values.push(nombre); }
+    if (descripcion) { updates.push('descripcion = ?'); values.push(descripcion); }
+    if (objetivo) { updates.push('objetivo = ?'); values.push(objetivo); }
+    if (nivel) { updates.push('nivel = ?'); values.push(nivel); }
+    if (duracion_estimada !== undefined) { updates.push('duracion_estimada = ?'); values.push(duracion_estimada); }
+    if (frecuencia_semanal !== undefined) { updates.push('frecuencia_semanal = ?'); values.push(frecuencia_semanal); }
+    if (imagen_url) { updates.push('imagen_url = ?'); values.push(imagen_url); }
+    if (estado) { updates.push('estado = ?'); values.push(estado); }
+    
+    if (updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+    }
+    
+    values.push(id);
+
+    try {
+        const [result] = await pool.promise().query(
+            `UPDATE rutinas SET ${updates.join(', ')}, updated_at = NOW() WHERE id = ?`, 
+            values
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Rutina no encontrada' });
+        }
+        
+        res.json({ success: true, message: 'Rutina actualizada correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al actualizar rutina' });
+    }
+});
+
+// Agregar ejercicio a rutina
+app.post('/rutinas/:id/ejercicios', async (req, res) => {
+    const { id } = req.params;
+    const { ejercicio_id, orden, series, repeticiones, descanso, peso_sugerido, notas } = req.body;
+    
+    if (!ejercicio_id) {
+        return res.status(400).json({ success: false, message: 'ejercicio_id es requerido' });
+    }
+
+    try {
+        const [result] = await pool.promise().query(
+            `INSERT INTO rutinas_ejercicios 
+            (rutina_id, ejercicio_id, orden, series, repeticiones, descanso, peso_sugerido, notas) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [id, ejercicio_id, orden || 999, series || 3, repeticiones || '12', descanso || 60, peso_sugerido, notas]
+        );
+
+        res.status(201).json({ 
+            success: true, 
+            id: result.insertId,
+            message: 'Ejercicio agregado a la rutina'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al agregar ejercicio', error: error.message });
+    }
+});
+
+// Actualizar ejercicio en rutina
+app.put('/rutinas/:rutina_id/ejercicios/:ejercicio_id', async (req, res) => {
+    const { rutina_id, ejercicio_id } = req.params;
+    const { orden, series, repeticiones, descanso, peso_sugerido, notas } = req.body;
+    
+    const updates = [];
+    const values = [];
+    
+    if (orden !== undefined) { updates.push('orden = ?'); values.push(orden); }
+    if (series !== undefined) { updates.push('series = ?'); values.push(series); }
+    if (repeticiones) { updates.push('repeticiones = ?'); values.push(repeticiones); }
+    if (descanso !== undefined) { updates.push('descanso = ?'); values.push(descanso); }
+    if (peso_sugerido) { updates.push('peso_sugerido = ?'); values.push(peso_sugerido); }
+    if (notas !== undefined) { updates.push('notas = ?'); values.push(notas); }
+    
+    if (updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+    }
+    
+    values.push(rutina_id, ejercicio_id);
+
+    try {
+        const [result] = await pool.promise().query(
+            `UPDATE rutinas_ejercicios SET ${updates.join(', ')} WHERE rutina_id = ? AND ejercicio_id = ?`, 
+            values
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Ejercicio en rutina no encontrado' });
+        }
+        
+        res.json({ success: true, message: 'Ejercicio actualizado en la rutina' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al actualizar ejercicio en rutina' });
+    }
+});
+
+// Eliminar ejercicio de rutina
+app.delete('/rutinas/:rutina_id/ejercicios/:ejercicio_id', async (req, res) => {
+    const { rutina_id, ejercicio_id } = req.params;
+    
+    try {
+        const [result] = await pool.promise().query(
+            'DELETE FROM rutinas_ejercicios WHERE rutina_id = ? AND ejercicio_id = ?', 
+            [rutina_id, ejercicio_id]
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Ejercicio en rutina no encontrado' });
+        }
+        
+        res.json({ success: true, message: 'Ejercicio eliminado de la rutina' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al eliminar ejercicio de rutina' });
+    }
+});
+
+// Eliminar rutina
+app.delete('/rutinas/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [result] = await pool.promise().query('DELETE FROM rutinas WHERE id = ?', [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Rutina no encontrada' });
+        }
+        
+        res.json({ success: true, message: 'Rutina eliminada correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al eliminar rutina' });
+    }
+});
+
+// Asignar rutina a usuario
+app.post('/usuarios/:usuario_id/rutinas/:rutina_id', async (req, res) => {
+    const { usuario_id, rutina_id } = req.params;
+    const { fecha_inicio, fecha_fin, notas } = req.body;
+    
+    try {
+        // Incrementar popularidad de la rutina
+        await pool.promise().query(
+            'UPDATE rutinas SET popularidad = popularidad + 1 WHERE id = ?',
+            [rutina_id]
+        );
+
+        const [result] = await pool.promise().query(
+            `INSERT INTO usuarios_rutinas (usuario_id, rutina_id, fecha_inicio, fecha_fin, notas, estado) 
+             VALUES (?, ?, ?, ?, ?, 'asignada')`,
+            [usuario_id, rutina_id, fecha_inicio, fecha_fin, notas]
+        );
+
+        res.status(201).json({ 
+            success: true, 
+            id: result.insertId,
+            message: 'Rutina asignada al usuario'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al asignar rutina', error: error.message });
+    }
+});
+
+// Ver rutinas de un usuario
+app.get('/usuarios/:usuario_id/rutinas', async (req, res) => {
+    const { usuario_id } = req.params;
+    const { estado } = req.query;
+    
+    let query = `
+        SELECT 
+            ur.id as asignacion_id, ur.fecha_asignacion, ur.fecha_inicio, ur.fecha_fin,
+            ur.estado as estado_asignacion, ur.progreso, ur.notas,
+            r.id as rutina_id, r.nombre, r.descripcion, r.objetivo, r.nivel,
+            r.duracion_estimada, r.frecuencia_semanal, r.imagen_url,
+            COUNT(DISTINCT re.ejercicio_id) as total_ejercicios
+        FROM usuarios_rutinas ur
+        INNER JOIN rutinas r ON ur.rutina_id = r.id
+        LEFT JOIN rutinas_ejercicios re ON r.id = re.rutina_id
+        WHERE ur.usuario_id = ?
+    `;
+    
+    const params = [usuario_id];
+    
+    if (estado) {
+        query += ' AND ur.estado = ?';
+        params.push(estado);
+    }
+    
+    query += ' GROUP BY ur.id ORDER BY ur.fecha_asignacion DESC';
+
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Actualizar progreso de rutina asignada
+app.put('/usuarios/:usuario_id/rutinas/:asignacion_id', async (req, res) => {
+    const { usuario_id, asignacion_id } = req.params;
+    const { estado, progreso, notas } = req.body;
+    
+    const updates = [];
+    const values = [];
+    
+    if (estado) { updates.push('estado = ?'); values.push(estado); }
+    if (progreso !== undefined) { updates.push('progreso = ?'); values.push(progreso); }
+    if (notas !== undefined) { updates.push('notas = ?'); values.push(notas); }
+    
+    // Auto-completar fechas según estado
+    if (estado === 'en_progreso') {
+        updates.push('fecha_inicio = COALESCE(fecha_inicio, CURDATE())');
+    } else if (estado === 'completada') {
+        updates.push('fecha_fin = CURDATE(), progreso = 100.00');
+    }
+    
+    if (updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+    }
+    
+    values.push(usuario_id, asignacion_id);
+
+    try {
+        const [result] = await pool.promise().query(
+            `UPDATE usuarios_rutinas SET ${updates.join(', ')}, updated_at = NOW() 
+             WHERE usuario_id = ? AND id = ?`, 
+            values
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Asignación no encontrada' });
+        }
+        
+        res.json({ success: true, message: 'Progreso actualizado correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al actualizar progreso' });
+    }
+});
+
+// Estadísticas de rutinas
+app.get('/rutinas/estadisticas', async (req, res) => {
+    try {
+        const [stats] = await pool.promise().query(`
+            SELECT 
+                COUNT(DISTINCT r.id) as total_rutinas,
+                COUNT(DISTINCT CASE WHEN r.tipo = 'publica' THEN r.id END) as rutinas_publicas,
+                COUNT(DISTINCT CASE WHEN r.tipo = 'personalizada' THEN r.id END) as rutinas_personalizadas,
+                COUNT(DISTINCT e.id) as total_ejercicios,
+                COUNT(DISTINCT ur.id) as total_asignaciones,
+                COUNT(DISTINCT CASE WHEN ur.estado = 'en_progreso' THEN ur.id END) as rutinas_en_progreso,
+                COUNT(DISTINCT CASE WHEN ur.estado = 'completada' THEN ur.id END) as rutinas_completadas
+            FROM rutinas r
+            LEFT JOIN ejercicios e ON e.estado = 'activo'
+            LEFT JOIN usuarios_rutinas ur ON r.id = ur.rutina_id
+            WHERE r.estado = 'activo'
+        `);
+        
+        const [populares] = await pool.promise().query(`
+            SELECT id, nombre, objetivo, nivel, popularidad
+            FROM rutinas
+            WHERE estado = 'activo' AND tipo = 'publica'
+            ORDER BY popularidad DESC
+            LIMIT 5
+        `);
+        
+        res.json({
+            ...stats[0],
+            rutinas_populares: populares
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Iniciar servidor
 app.listen(port, () => {
     console.log(`🏋️ Sistema de Gimnasio corriendo en http://localhost:${port}`);
@@ -577,12 +1150,31 @@ app.listen(port, () => {
     console.log('  POST /usuarios/:id/visita - Registrar visita');
     console.log('  GET /usuarios/estadisticas - Estadísticas usuarios');
     console.log('\n🛒 PRODUCTOS:');
-    console.log('  GET /productos - Listar productos (filtros: ?categoria=suplementos&stock_bajo=true)');
+    console.log('  GET /productos - Listar productos');
     console.log('  GET /productos/:id - Ver producto individual');
-    console.log('  POST /productos - Crear producto nombre, descripcion, categoria, stock, stock_minimo, precio_compra, precio_venta');
+    console.log('  POST /productos - Crear producto');
     console.log('  PUT /productos/:id - Actualizar producto');
     console.log('  DELETE /productos/:id - Eliminar producto');
     console.log('  POST /productos/:id/vender - Vender producto');
     console.log('  GET /productos/estadisticas - Estadísticas productos');
     console.log('  GET /ventas - Historial de ventas');
+    console.log('\n💪 EJERCICIOS:');
+    console.log('  GET /ejercicios - Listar ejercicios (filtros: ?grupo_muscular=pecho&tipo=fuerza&nivel=principiante)');
+    console.log('  GET /ejercicios/:id - Ver ejercicio individual');
+    console.log('  POST /ejercicios - Crear ejercicio');
+    console.log('  PUT /ejercicios/:id - Actualizar ejercicio');
+    console.log('  DELETE /ejercicios/:id - Eliminar ejercicio');
+    console.log('\n📋 RUTINAS:');
+    console.log('  GET /rutinas - Listar rutinas (filtros: ?objetivo=hipertrofia&nivel=intermedio&tipo=publica)');
+    console.log('  GET /rutinas/:id - Ver rutina completa con ejercicios');
+    console.log('  POST /rutinas - Crear rutina (con ejercicios opcionales)');
+    console.log('  PUT /rutinas/:id - Actualizar rutina');
+    console.log('  DELETE /rutinas/:id - Eliminar rutina');
+    console.log('  POST /rutinas/:id/ejercicios - Agregar ejercicio a rutina');
+    console.log('  PUT /rutinas/:rutina_id/ejercicios/:ejercicio_id - Actualizar ejercicio en rutina');
+    console.log('  DELETE /rutinas/:rutina_id/ejercicios/:ejercicio_id - Eliminar ejercicio de rutina');
+    console.log('  POST /usuarios/:usuario_id/rutinas/:rutina_id - Asignar rutina a usuario');
+    console.log('  GET /usuarios/:usuario_id/rutinas - Ver rutinas de usuario');
+    console.log('  PUT /usuarios/:usuario_id/rutinas/:asignacion_id - Actualizar progreso de rutina');
+    console.log('  GET /rutinas/estadisticas - Estadísticas de rutinas');
 });
