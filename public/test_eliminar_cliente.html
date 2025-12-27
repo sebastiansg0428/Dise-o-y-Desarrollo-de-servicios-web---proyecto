@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test Eliminar Cliente</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 50px auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #667eea;
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+      }
+      input,
+      select {
+        width: 100%;
+        padding: 10px;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        font-size: 14px;
+      }
+      button {
+        background: #667eea;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+        margin-right: 10px;
+      }
+      button:hover {
+        background: #5568d3;
+      }
+      button.danger {
+        background: #e74c3c;
+      }
+      button.danger:hover {
+        background: #c0392b;
+      }
+      .result {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 5px;
+        display: none;
+      }
+      .result.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .result.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      pre {
+        background: #f8f9fa;
+        padding: 10px;
+        border-radius: 5px;
+        overflow-x: auto;
+      }
+      .clientes-list {
+        margin-top: 20px;
+      }
+      .cliente-item {
+        background: #f8f9fa;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🧪 Test Eliminar Cliente del Entrenador</h1>
+
+      <div class="form-group">
+        <label>Entrenador ID:</label>
+        <input type="number" id="entrenadorId" value="1" placeholder="Ej: 1" />
+      </div>
+
+      <button onclick="cargarClientes()">🔄 Cargar Clientes</button>
+
+      <div id="clientesList" class="clientes-list"></div>
+
+      <div id="result" class="result"></div>
+
+      <h3 style="margin-top: 30px">Test Manual</h3>
+      <div class="form-group">
+        <label>Usuario ID a eliminar:</label>
+        <input type="number" id="usuarioId" placeholder="Ej: 5" />
+      </div>
+
+      <button class="danger" onclick="eliminarCliente()">
+        🗑️ Eliminar Cliente (Manual)
+      </button>
+    </div>
+
+    <script>
+      const API_URL = "http://localhost:3001";
+
+      async function cargarClientes() {
+        const entrenadorId = document.getElementById("entrenadorId").value;
+
+        if (!entrenadorId) {
+          mostrarResultado("Por favor ingrese un ID de entrenador", "error");
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorId}/clientes`
+          );
+          const data = await response.json();
+
+          console.log("Clientes cargados:", data);
+
+          if (Array.isArray(data) && data.length > 0) {
+            mostrarClientes(data, entrenadorId);
+          } else {
+            document.getElementById("clientesList").innerHTML =
+              "<p>No hay clientes asignados</p>";
+          }
+        } catch (error) {
+          console.error("Error al cargar clientes:", error);
+          mostrarResultado(
+            "Error al cargar clientes: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      function mostrarClientes(clientes, entrenadorId) {
+        const container = document.getElementById("clientesList");
+        container.innerHTML = "<h3>Clientes Asignados:</h3>";
+
+        clientes.forEach((cliente) => {
+          const div = document.createElement("div");
+          div.className = "cliente-item";
+          div.innerHTML = `
+                    <div>
+                        <strong>${cliente.usuario_nombre || "Usuario"} ${
+            cliente.usuario_apellido || ""
+          }</strong>
+                        <br>
+                        <small>ID: ${cliente.usuario_id} | Email: ${
+            cliente.email || "N/A"
+          }</small>
+                    </div>
+                    <button class="danger" onclick="eliminarClienteDirecto(${entrenadorId}, ${
+            cliente.usuario_id
+          })">
+                        🗑️ Eliminar
+                    </button>
+                `;
+          container.appendChild(div);
+        });
+      }
+
+      async function eliminarClienteDirecto(entrenadorId, usuarioId) {
+        if (
+          !confirm(
+            `¿Está seguro de eliminar al usuario ${usuarioId} del entrenador ${entrenadorId}?`
+          )
+        ) {
+          return;
+        }
+
+        console.log(
+          `Eliminando cliente - Entrenador: ${entrenadorId}, Usuario: ${usuarioId}`
+        );
+
+        try {
+          const url = `${API_URL}/entrenadores/${entrenadorId}/clientes/${usuarioId}`;
+          console.log("URL DELETE:", url);
+
+          const response = await fetch(url, {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+
+          console.log("Response status:", response.status);
+          console.log("Response ok:", response.ok);
+
+          const data = await response.json();
+          console.log("Response data:", data);
+
+          if (response.ok && data.success) {
+            mostrarResultado(`✅ ${data.message}`, "success");
+            // Recargar lista de clientes
+            setTimeout(() => cargarClientes(), 500);
+          } else {
+            mostrarResultado(
+              `❌ ${data.message || "Error desconocido"}`,
+              "error"
+            );
+          }
+        } catch (error) {
+          console.error("Error al eliminar cliente:", error);
+          mostrarResultado(`❌ Error: ${error.message}`, "error");
+        }
+      }
+
+      async function eliminarCliente() {
+        const entrenadorId = document.getElementById("entrenadorId").value;
+        const usuarioId = document.getElementById("usuarioId").value;
+
+        if (!entrenadorId || !usuarioId) {
+          mostrarResultado("Por favor complete ambos campos", "error");
+          return;
+        }
+
+        await eliminarClienteDirecto(entrenadorId, usuarioId);
+      }
+
+      function mostrarResultado(mensaje, tipo) {
+        const resultDiv = document.getElementById("result");
+        resultDiv.textContent = mensaje;
+        resultDiv.className = `result ${tipo}`;
+        resultDiv.style.display = "block";
+
+        setTimeout(() => {
+          resultDiv.style.display = "none";
+        }, 5000);
+      }
+
+      // Cargar clientes al iniciar
+      window.onload = () => {
+        cargarClientes();
+      };
+    </script>
+  </body>
+</html>

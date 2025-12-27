@@ -5,8 +5,17 @@ const cors = require('cors');
 const app = express();
 const port = 3001;
 
-// Middlewares
-app.use(cors());
+// Middlewares - CORS mejorado para React
+app.use(cors({
+    origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
+
+// Manejar preflight requests
+app.options('*', cors());
+
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -852,21 +861,69 @@ app.delete('/entrenadores/:id/horarios/:horario_id', async (req, res) => {
 });
 
 // Asignación de clientes a entrenador
-app.post('/entrenadores/:entrenador_id/clientes/:usuario_id', async (req, res) => {
-    const { entrenador_id, usuario_id } = req.params;
-    const { notas } = req.body;
+app.post('/entrenadores/:entrenador_id/clientes', async (req, res) => {
+    const { entrenador_id } = req.params;
+    const { usuario_id, notas } = req.body;
+    
+    console.log(`[POST CLIENTE] Entrenador: ${entrenador_id}, Usuario: ${usuario_id}`);
+    
+    if (!usuario_id) {
+        return res.status(400).json({ success: false, message: 'usuario_id es requerido' });
+    }
+    
     try {
-        const [result] = await pool.promise().query(
-            `INSERT INTO entrenadores_clientes (entrenador_id, usuario_id, notas)
-             VALUES (?, ?, ?)`,
-            [entrenador_id, usuario_id, notas]
+        // Verificar que el entrenador existe
+        const [entrenador] = await pool.promise().query(
+            'SELECT id, estado FROM entrenadores WHERE id = ?',
+            [entrenador_id]
         );
-        res.status(201).json({ success: true, id: result.insertId, message: 'Cliente asignado al entrenador' });
-    } catch (error) {
-        if (error.code === 'ER_DUP_ENTRY') {
+        
+        if (entrenador.length === 0) {
+            return res.status(404).json({ success: false, message: 'Entrenador no encontrado' });
+        }
+        
+        // Verificar que el usuario existe
+        const [usuario] = await pool.promise().query(
+            'SELECT id, estado FROM usuarios WHERE id = ?',
+            [usuario_id]
+        );
+        
+        if (usuario.length === 0) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+        }
+        
+        // Verificar si ya está asignado
+        const [yaAsignado] = await pool.promise().query(
+            'SELECT id FROM entrenadores_clientes WHERE entrenador_id = ? AND usuario_id = ?',
+            [entrenador_id, usuario_id]
+        );
+        
+        if (yaAsignado.length > 0) {
             return res.status(409).json({ success: false, message: 'El cliente ya está asignado a este entrenador' });
         }
-        res.status(500).json({ success: false, message: 'Error al asignar cliente' });
+        
+        const [result] = await pool.promise().query(
+            `INSERT INTO entrenadores_clientes (entrenador_id, usuario_id, notas, estado)
+             VALUES (?, ?, ?, 'activo')`,
+            [entrenador_id, usuario_id, notas || null]
+        );
+        
+        console.log(`[POST CLIENTE] Asignado correctamente. ID: ${result.insertId}`);
+        
+        res.status(201).json({ 
+            success: true, 
+            id: result.insertId, 
+            message: 'Cliente asignado al entrenador correctamente',
+            entrenador_id: parseInt(entrenador_id),
+            usuario_id: parseInt(usuario_id)
+        });
+    } catch (error) {
+        console.error('[POST CLIENTE] Error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error al asignar cliente',
+            error: error.message
+        });
     }
 });
 
@@ -893,14 +950,49 @@ app.get('/entrenadores/:entrenador_id/clientes', async (req, res) => {
 
 app.delete('/entrenadores/:entrenador_id/clientes/:usuario_id', async (req, res) => {
     const { entrenador_id, usuario_id } = req.params;
+    
+    console.log(`[DELETE CLIENTE] Entrenador: ${entrenador_id}, Usuario: ${usuario_id}`);
+    
     try {
-        const [result] = await pool.promise().query('DELETE FROM entrenadores_clientes WHERE entrenador_id = ? AND usuario_id = ?', [entrenador_id, usuario_id]);
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ success: false, message: 'Asignación no encontrada' });
+        // Verificar que la asignación existe antes de eliminar
+        const [existe] = await pool.promise().query(
+            'SELECT * FROM entrenadores_clientes WHERE entrenador_id = ? AND usuario_id = ?',
+            [entrenador_id, usuario_id]
+        );
+        
+        if (existe.length === 0) {
+            console.log('[DELETE CLIENTE] Asignación no encontrada');
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Asignación no encontrada',
+                entrenador_id: parseInt(entrenador_id),
+                usuario_id: parseInt(usuario_id)
+            });
         }
-        res.json({ success: true, message: 'Cliente desasignado del entrenador' });
+        
+        const [result] = await pool.promise().query(
+            'DELETE FROM entrenadores_clientes WHERE entrenador_id = ? AND usuario_id = ?',
+            [entrenador_id, usuario_id]
+        );
+        
+        console.log(`[DELETE CLIENTE] Eliminado correctamente. Filas afectadas: ${result.affectedRows}`);
+        
+        res.status(200).json({ 
+            success: true, 
+            message: 'Cliente desasignado del entrenador correctamente',
+            entrenador_id: parseInt(entrenador_id),
+            usuario_id: parseInt(usuario_id),
+            affectedRows: result.affectedRows
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Error al desasignar cliente' });
+        console.error('[DELETE CLIENTE] Error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error al desasignar cliente',
+            error: error.message,
+            entrenador_id: parseInt(entrenador_id),
+            usuario_id: parseInt(usuario_id)
+        });
     }
 });
 
@@ -1022,14 +1114,111 @@ app.put('/sesiones/:id', async (req, res) => {
     }
 });
 
+// Eliminar sesión
+app.delete('/sesiones/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    console.log(`[DELETE SESION] ID: ${id}`);
+    
+    try {
+        // Verificar que la sesión existe
+        const [existe] = await pool.promise().query(
+            'SELECT id, estado FROM sesiones_entrenamiento WHERE id = ?',
+            [id]
+        );
+        
+        if (existe.length === 0) {
+            console.log('[DELETE SESION] Sesión no encontrada');
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Sesión no encontrada',
+                id: parseInt(id)
+            });
+        }
+        
+        const [result] = await pool.promise().query(
+            'DELETE FROM sesiones_entrenamiento WHERE id = ?',
+            [id]
+        );
+        
+        console.log(`[DELETE SESION] Eliminada correctamente. Filas afectadas: ${result.affectedRows}`);
+        
+        res.status(200).json({ 
+            success: true, 
+            message: 'Sesión eliminada correctamente',
+            id: parseInt(id),
+            affectedRows: result.affectedRows
+        });
+    } catch (error) {
+        console.error('[DELETE SESION] Error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error al eliminar sesión',
+            error: error.message,
+            id: parseInt(id)
+        });
+    }
+});
+
+// Ver sesión individual
+app.get('/sesiones/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [rows] = await pool.promise().query(
+            `SELECT s.*, 
+                    e.nombre as entrenador_nombre, e.apellido as entrenador_apellido,
+                    u.nombre as usuario_nombre, u.apellido as usuario_apellido,
+                    r.nombre as rutina_nombre,
+                    DATE_FORMAT(s.fecha, "%d/%m/%Y %H:%i") as fecha_programada
+             FROM sesiones_entrenamiento s
+             LEFT JOIN entrenadores e ON s.entrenador_id = e.id
+             LEFT JOIN usuarios u ON s.usuario_id = u.id
+             LEFT JOIN rutinas r ON s.rutina_id = r.id
+             WHERE s.id = ?`,
+            [id]
+        );
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Sesión no encontrada' });
+        }
+        
+        res.json(rows[0]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Valoraciones de entrenadores
 app.post('/entrenadores/:entrenador_id/valoraciones', async (req, res) => {
     const { entrenador_id } = req.params;
     const { usuario_id, puntuacion, comentario } = req.body;
+    
     if (!usuario_id || !puntuacion) {
         return res.status(400).json({ success: false, message: 'usuario_id y puntuacion son requeridos' });
     }
+    
+    // Validar puntuación entre 1 y 5
+    if (puntuacion < 1 || puntuacion > 5) {
+        return res.status(400).json({ success: false, message: 'La puntuación debe estar entre 1 y 5' });
+    }
+    
     try {
+        // Verificar si el usuario ya valoró a este entrenador
+        const [existente] = await pool.promise().query(
+            'SELECT id FROM valoraciones_entrenadores WHERE entrenador_id = ? AND usuario_id = ?',
+            [entrenador_id, usuario_id]
+        );
+        
+        if (existente.length > 0) {
+            // Actualizar valoración existente
+            await pool.promise().query(
+                'UPDATE valoraciones_entrenadores SET puntuacion = ?, comentario = ?, created_at = NOW() WHERE entrenador_id = ? AND usuario_id = ?',
+                [puntuacion, comentario, entrenador_id, usuario_id]
+            );
+            return res.json({ success: true, message: 'Valoración actualizada' });
+        }
+        
+        // Crear nueva valoración
         const [result] = await pool.promise().query(
             `INSERT INTO valoraciones_entrenadores (entrenador_id, usuario_id, puntuacion, comentario)
              VALUES (?, ?, ?, ?)`,
@@ -1037,7 +1226,8 @@ app.post('/entrenadores/:entrenador_id/valoraciones', async (req, res) => {
         );
         res.status(201).json({ success: true, id: result.insertId, message: 'Valoración registrada' });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Error al registrar valoración' });
+        console.error('Error al registrar valoración:', error);
+        res.status(500).json({ success: false, message: 'Error al registrar valoración', error: error.message });
     }
 });
 
@@ -1045,7 +1235,9 @@ app.get('/entrenadores/:entrenador_id/valoraciones', async (req, res) => {
     const { entrenador_id } = req.params;
     try {
         const [rows] = await pool.promise().query(
-            `SELECT v.*, u.nombre as usuario_nombre
+            `SELECT v.id, v.entrenador_id, v.usuario_id, v.puntuacion, v.comentario,
+                    DATE_FORMAT(v.created_at, "%d/%m/%Y %H:%i") as fecha_valoracion,
+                    u.nombre as usuario_nombre, u.apellido as usuario_apellido
              FROM valoraciones_entrenadores v
              INNER JOIN usuarios u ON u.id = v.usuario_id
              WHERE v.entrenador_id = ?
@@ -1055,6 +1247,55 @@ app.get('/entrenadores/:entrenador_id/valoraciones', async (req, res) => {
         res.json(rows);
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// Eliminar valoración
+app.delete('/entrenadores/:entrenador_id/valoraciones/:valoracion_id', async (req, res) => {
+    const { entrenador_id, valoracion_id } = req.params;
+    
+    console.log(`[DELETE VALORACION] Entrenador: ${entrenador_id}, Valoracion: ${valoracion_id}`);
+    
+    try {
+        // Verificar que la valoración existe
+        const [existe] = await pool.promise().query(
+            'SELECT id FROM valoraciones_entrenadores WHERE id = ? AND entrenador_id = ?',
+            [valoracion_id, entrenador_id]
+        );
+        
+        if (existe.length === 0) {
+            console.log('[DELETE VALORACION] Valoración no encontrada');
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Valoración no encontrada',
+                entrenador_id: parseInt(entrenador_id),
+                valoracion_id: parseInt(valoracion_id)
+            });
+        }
+        
+        const [result] = await pool.promise().query(
+            'DELETE FROM valoraciones_entrenadores WHERE id = ? AND entrenador_id = ?',
+            [valoracion_id, entrenador_id]
+        );
+        
+        console.log(`[DELETE VALORACION] Eliminada correctamente. Filas afectadas: ${result.affectedRows}`);
+        
+        res.status(200).json({ 
+            success: true, 
+            message: 'Valoración eliminada correctamente',
+            entrenador_id: parseInt(entrenador_id),
+            valoracion_id: parseInt(valoracion_id),
+            affectedRows: result.affectedRows
+        });
+    } catch (error) {
+        console.error('[DELETE VALORACION] Error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error al eliminar valoración',
+            error: error.message,
+            entrenador_id: parseInt(entrenador_id),
+            valoracion_id: parseInt(valoracion_id)
+        });
     }
 });
 
@@ -1638,7 +1879,7 @@ app.listen(port, () => {
     console.log('👤 USUARIOS:');
     console.log('  POST /login - Iniciar sesión');
     console.log('  POST /register - Registrar usuario');
-    console.log('  GET /usuarios - Listar usuarios');
+    console.log('  GET /usuarios - Listar usuarios (filtros: ?estado, membresia, vencidas)');
     console.log('  GET /usuarios/:id - Ver usuario individual');
     console.log('  PUT /usuarios/:id - Actualizar usuario');
     console.log('  PUT /usuarios/:id/estado - Cambiar estado');
@@ -1646,7 +1887,7 @@ app.listen(port, () => {
     console.log('  POST /usuarios/:id/visita - Registrar visita');
     console.log('  GET /usuarios/estadisticas - Estadísticas usuarios');
     console.log('\n🛒 PRODUCTOS:');
-    console.log('  GET /productos - Listar productos');
+    console.log('  GET /productos - Listar productos (filtros: ?categoria, estado, stock_bajo)');
     console.log('  GET /productos/:id - Ver producto individual');
     console.log('  POST /productos - Crear producto');
     console.log('  PUT /productos/:id - Actualizar producto');
@@ -1691,4 +1932,10 @@ app.listen(port, () => {
     console.log('  POST /entrenadores/:entrenador_id/valoraciones - Crear valoración');
     console.log('  GET /entrenadores/:entrenador_id/valoraciones - Listar valoraciones');
     console.log('  GET /entrenadores/estadisticas - Estadísticas de entrenadores');
+    console.log('\n📋 SESIONES:');
+    console.log('  GET /sesiones - Listar sesiones (filtros: ?fecha_desde, fecha_hasta, usuario_id)');
+    console.log('  POST /sesiones - Crear sesión');
+    console.log('  PUT /sesiones/:id - Actualizar sesión');
+    console.log('  DELETE /sesiones/:id - Eliminar sesión');
+    console.log('  GET /sesiones/:id - Ver sesión individual');
 });

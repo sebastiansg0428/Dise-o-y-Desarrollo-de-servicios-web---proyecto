@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gestión Completa de Entrenadores - Reynal GYM</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 20px;
+        min-height: 100vh;
+      }
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 20px;
+        padding: 30px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      }
+      h1 {
+        color: #667eea;
+        text-align: center;
+        margin-bottom: 30px;
+        font-size: 2.5em;
+      }
+      h2 {
+        color: #667eea;
+        margin: 30px 0 15px 0;
+        padding-bottom: 10px;
+        border-bottom: 3px solid #667eea;
+      }
+      .tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+      .tab {
+        padding: 12px 24px;
+        background: #f0f0f0;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: all 0.3s;
+      }
+      .tab:hover {
+        background: #e0e0e0;
+      }
+      .tab.active {
+        background: #667eea;
+        color: white;
+      }
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+        color: #333;
+      }
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 10px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        font-size: 14px;
+        transition: border 0.3s;
+      }
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 80px;
+      }
+      button {
+        background: #667eea;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background 0.3s;
+        margin-right: 10px;
+      }
+      button:hover {
+        background: #5568d3;
+      }
+      button.danger {
+        background: #e74c3c;
+      }
+      button.danger:hover {
+        background: #c0392b;
+      }
+      button.success {
+        background: #27ae60;
+      }
+      button.success:hover {
+        background: #229954;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+      }
+      th,
+      td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+      }
+      th {
+        background: #667eea;
+        color: white;
+        font-weight: bold;
+      }
+      tr:hover {
+        background: #f5f5f5;
+      }
+      .message {
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        display: none;
+      }
+      .message.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+        display: block;
+      }
+      .message.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+        display: block;
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+      }
+      .card {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 15px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: bold;
+      }
+      .badge.programada {
+        background: #3498db;
+        color: white;
+      }
+      .badge.completada {
+        background: #27ae60;
+        color: white;
+      }
+      .badge.cancelada {
+        background: #e74c3c;
+        color: white;
+      }
+      .badge.en-curso {
+        background: #f39c12;
+        color: white;
+      }
+      .rating {
+        color: #f39c12;
+        font-size: 20px;
+      }
+      .actions {
+        display: flex;
+        gap: 5px;
+      }
+      .actions button {
+        padding: 6px 12px;
+        font-size: 12px;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🏋️ Gestión Completa de Entrenadores</h1>
+
+      <div id="message" class="message"></div>
+
+      <div class="form-group">
+        <label>Seleccionar Entrenador:</label>
+        <select id="entrenadorSelect" onchange="cargarDatosEntrenador()">
+          <option value="">-- Seleccione un entrenador --</option>
+        </select>
+      </div>
+
+      <div id="entrenadorInfo" class="card" style="display: none">
+        <h3 id="entrenadorNombre"></h3>
+        <p>
+          <strong>Especialidad:</strong>
+          <span id="entrenadorEspecialidad"></span>
+        </p>
+        <p><strong>Tarifa:</strong> <span id="entrenadorTarifa"></span></p>
+        <p>
+          <strong>Experiencia:</strong>
+          <span id="entrenadorExperiencia"></span> años
+        </p>
+        <p><strong>Estado:</strong> <span id="entrenadorEstado"></span></p>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" onclick="cambiarTab('horarios')">
+          📅 Horarios
+        </button>
+        <button class="tab" onclick="cambiarTab('clientes')">
+          👥 Clientes
+        </button>
+        <button class="tab" onclick="cambiarTab('sesiones')">
+          🏃 Sesiones
+        </button>
+        <button class="tab" onclick="cambiarTab('valoraciones')">
+          ⭐ Valoraciones
+        </button>
+      </div>
+
+      <!-- Tab Horarios -->
+      <div id="tab-horarios" class="tab-content active">
+        <h2>Gestión de Horarios</h2>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Día de la semana:</label>
+            <select id="dia_semana">
+              <option value="Lunes">Lunes</option>
+              <option value="Martes">Martes</option>
+              <option value="Miércoles">Miércoles</option>
+              <option value="Jueves">Jueves</option>
+              <option value="Viernes">Viernes</option>
+              <option value="Sábado">Sábado</option>
+              <option value="Domingo">Domingo</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Disponible:</label>
+            <select id="disponible">
+              <option value="1">Sí</option>
+              <option value="0">No</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Hora Inicio:</label>
+            <input type="time" id="hora_inicio" />
+          </div>
+          <div class="form-group">
+            <label>Hora Fin:</label>
+            <input type="time" id="hora_fin" />
+          </div>
+        </div>
+
+        <button onclick="agregarHorario()">➕ Agregar Horario</button>
+
+        <table id="tablaHorarios">
+          <thead>
+            <tr>
+              <th>Día</th>
+              <th>Hora Inicio</th>
+              <th>Hora Fin</th>
+              <th>Disponible</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <!-- Tab Clientes -->
+      <div id="tab-clientes" class="tab-content">
+        <h2>Clientes Asignados</h2>
+
+        <div class="form-group">
+          <label>Asignar Cliente:</label>
+          <select id="usuarioSelect">
+            <option value="">-- Seleccione un cliente --</option>
+          </select>
+        </div>
+        <button onclick="asignarCliente()">➕ Asignar Cliente</button>
+
+        <table id="tablaClientes">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Nombre</th>
+              <th>Email</th>
+              <th>Teléfono</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <!-- Tab Sesiones -->
+      <div id="tab-sesiones" class="tab-content">
+        <h2>Sesiones de Entrenamiento</h2>
+
+        <h3>Crear Nueva Sesión</h3>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Cliente:</label>
+            <select id="sesion_usuario_id"></select>
+          </div>
+          <div class="form-group">
+            <label>Rutina:</label>
+            <select id="sesion_rutina_id"></select>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Fecha y Hora:</label>
+            <input type="datetime-local" id="sesion_fecha" />
+          </div>
+          <div class="form-group">
+            <label>Duración (minutos):</label>
+            <input
+              type="number"
+              id="sesion_duracion"
+              value="60"
+              min="15"
+              max="240"
+            />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Ubicación:</label>
+          <input
+            type="text"
+            id="sesion_ubicacion"
+            placeholder="Ej: Sala de pesas"
+          />
+        </div>
+
+        <div class="form-group">
+          <label>Notas:</label>
+          <textarea
+            id="sesion_notas"
+            placeholder="Notas adicionales sobre la sesión"
+          ></textarea>
+        </div>
+
+        <button onclick="crearSesion()">➕ Crear Sesión</button>
+
+        <h3>Filtrar Sesiones</h3>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Estado:</label>
+            <select id="filtro_estado" onchange="cargarSesiones()">
+              <option value="">Todas</option>
+              <option value="programada">Programadas</option>
+              <option value="en-curso">En Curso</option>
+              <option value="completada">Completadas</option>
+              <option value="cancelada">Canceladas</option>
+            </select>
+          </div>
+        </div>
+
+        <table id="tablaSesiones">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Cliente</th>
+              <th>Rutina</th>
+              <th>Fecha</th>
+              <th>Duración</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <!-- Tab Valoraciones -->
+      <div id="tab-valoraciones" class="tab-content">
+        <h2>Valoraciones del Entrenador</h2>
+
+        <h3>Agregar Valoración de Prueba</h3>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Cliente:</label>
+            <select id="valoracion_usuario_id"></select>
+          </div>
+          <div class="form-group">
+            <label>Puntuación (1-5):</label>
+            <select id="valoracion_puntuacion">
+              <option value="5">⭐⭐⭐⭐⭐ (5)</option>
+              <option value="4">⭐⭐⭐⭐ (4)</option>
+              <option value="3">⭐⭐⭐ (3)</option>
+              <option value="2">⭐⭐ (2)</option>
+              <option value="1">⭐ (1)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Comentario:</label>
+          <textarea
+            id="valoracion_comentario"
+            placeholder="Escriba su opinión sobre el entrenador"
+          ></textarea>
+        </div>
+
+        <button onclick="agregarValoracion()">➕ Agregar Valoración</button>
+
+        <div id="listaValoraciones"></div>
+      </div>
+    </div>
+
+    <script>
+      const API_URL = "http://localhost:3001";
+      let entrenadorActual = null;
+
+      // Función para formatear pesos colombianos
+      function formatearPesosColombianos(valor) {
+        if (valor === null || valor === undefined) return "$0";
+        const numero = typeof valor === "string" ? parseFloat(valor) : valor;
+        return (
+          "$" + numero.toLocaleString("es-CO", { maximumFractionDigits: 0 })
+        );
+      }
+
+      // Mostrar mensajes
+      function mostrarMensaje(texto, tipo = "success") {
+        const messageDiv = document.getElementById("message");
+        messageDiv.textContent = texto;
+        messageDiv.className = `message ${tipo}`;
+        setTimeout(() => {
+          messageDiv.className = "message";
+        }, 5000);
+      }
+
+      // Cambiar tabs
+      function cambiarTab(tabName) {
+        document
+          .querySelectorAll(".tab")
+          .forEach((tab) => tab.classList.remove("active"));
+        document
+          .querySelectorAll(".tab-content")
+          .forEach((content) => content.classList.remove("active"));
+
+        event.target.classList.add("active");
+        document.getElementById(`tab-${tabName}`).classList.add("active");
+
+        if (entrenadorActual) {
+          if (tabName === "horarios") cargarHorarios();
+          if (tabName === "clientes") cargarClientes();
+          if (tabName === "sesiones") cargarSesiones();
+          if (tabName === "valoraciones") cargarValoraciones();
+        }
+      }
+
+      // Cargar lista de entrenadores
+      async function cargarEntrenadores() {
+        try {
+          const response = await fetch(`${API_URL}/entrenadores`);
+          const entrenadores = await response.json();
+
+          const select = document.getElementById("entrenadorSelect");
+          select.innerHTML =
+            '<option value="">-- Seleccione un entrenador --</option>';
+
+          entrenadores.forEach((e) => {
+            const option = document.createElement("option");
+            option.value = e.id;
+            option.textContent = `${e.nombre} ${e.apellido} - ${e.especialidad}`;
+            select.appendChild(option);
+          });
+        } catch (error) {
+          mostrarMensaje(
+            "Error al cargar entrenadores: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      // Cargar datos del entrenador
+      async function cargarDatosEntrenador() {
+        const entrenadorId = document.getElementById("entrenadorSelect").value;
+
+        if (!entrenadorId) {
+          document.getElementById("entrenadorInfo").style.display = "none";
+          entrenadorActual = null;
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorId}`
+          );
+          const entrenador = await response.json();
+
+          entrenadorActual = entrenador;
+
+          document.getElementById(
+            "entrenadorNombre"
+          ).textContent = `${entrenador.nombre} ${entrenador.apellido}`;
+          document.getElementById("entrenadorEspecialidad").textContent =
+            entrenador.especialidad;
+          document.getElementById("entrenadorTarifa").textContent =
+            formatearPesosColombianos(entrenador.tarifa_rutina);
+          document.getElementById("entrenadorExperiencia").textContent =
+            entrenador.experiencia_anios || 0;
+          document.getElementById("entrenadorEstado").textContent =
+            entrenador.estado === "activo" ? "✅ Activo" : "❌ Inactivo";
+
+          document.getElementById("entrenadorInfo").style.display = "block";
+
+          // Cargar datos según tab activo
+          cargarHorarios();
+          cargarUsuarios();
+          cargarRutinas();
+        } catch (error) {
+          mostrarMensaje(
+            "Error al cargar datos del entrenador: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      // HORARIOS
+      async function cargarHorarios() {
+        if (!entrenadorActual) return;
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/horarios`
+          );
+          const horarios = await response.json();
+
+          const tbody = document.querySelector("#tablaHorarios tbody");
+          tbody.innerHTML = "";
+
+          horarios.forEach((h) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                        <td>${h.dia_semana}</td>
+                        <td>${h.hora_inicio}</td>
+                        <td>${h.hora_fin}</td>
+                        <td>${h.disponible ? "✅" : "❌"}</td>
+                        <td class="actions">
+                            <button class="danger" onclick="eliminarHorario(${
+                              h.id
+                            })">🗑️ Eliminar</button>
+                        </td>
+                    `;
+            tbody.appendChild(tr);
+          });
+        } catch (error) {
+          mostrarMensaje("Error al cargar horarios: " + error.message, "error");
+        }
+      }
+
+      async function agregarHorario() {
+        if (!entrenadorActual) {
+          mostrarMensaje("Seleccione un entrenador primero", "error");
+          return;
+        }
+
+        const data = {
+          dia_semana: document.getElementById("dia_semana").value,
+          hora_inicio: document.getElementById("hora_inicio").value,
+          hora_fin: document.getElementById("hora_fin").value,
+          disponible: parseInt(document.getElementById("disponible").value),
+        };
+
+        if (!data.hora_inicio || !data.hora_fin) {
+          mostrarMensaje("Complete todos los campos", "error");
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/horarios`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(data),
+            }
+          );
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Horario agregado correctamente");
+            cargarHorarios();
+            document.getElementById("hora_inicio").value = "";
+            document.getElementById("hora_fin").value = "";
+          } else {
+            mostrarMensaje(result.message, "error");
+          }
+        } catch (error) {
+          mostrarMensaje("Error al agregar horario: " + error.message, "error");
+        }
+      }
+
+      async function eliminarHorario(horarioId) {
+        if (!confirm("¿Está seguro de eliminar este horario?")) return;
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/horarios/${horarioId}`,
+            {
+              method: "DELETE",
+            }
+          );
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Horario eliminado correctamente");
+            cargarHorarios();
+          } else {
+            mostrarMensaje(result.message, "error");
+          }
+        } catch (error) {
+          mostrarMensaje(
+            "Error al eliminar horario: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      // CLIENTES
+      async function cargarUsuarios() {
+        try {
+          const response = await fetch(`${API_URL}/usuarios`);
+          const usuarios = await response.json();
+
+          const selects = [
+            document.getElementById("usuarioSelect"),
+            document.getElementById("sesion_usuario_id"),
+            document.getElementById("valoracion_usuario_id"),
+          ];
+
+          selects.forEach((select) => {
+            select.innerHTML = '<option value="">-- Seleccione --</option>';
+            usuarios.forEach((u) => {
+              const option = document.createElement("option");
+              option.value = u.id;
+              option.textContent = `${u.nombre} ${u.apellido} - ${u.email}`;
+              select.appendChild(option);
+            });
+          });
+        } catch (error) {
+          console.error("Error al cargar usuarios:", error);
+        }
+      }
+
+      async function cargarClientes() {
+        if (!entrenadorActual) return;
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/clientes`
+          );
+          const clientes = await response.json();
+
+          const tbody = document.querySelector("#tablaClientes tbody");
+          tbody.innerHTML = "";
+
+          clientes.forEach((c) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                        <td>${c.usuario_id}</td>
+                        <td>${c.usuario_nombre || ""} ${
+              c.usuario_apellido || ""
+            }</td>
+                        <td>${c.email || "N/A"}</td>
+                        <td>${c.telefono || "N/A"}</td>
+                        <td>${
+                          c.estado === "activo" ? "✅ Activo" : "❌ Inactivo"
+                        }</td>
+                        <td class="actions">
+                            <button class="danger" onclick="eliminarCliente(${
+                              c.usuario_id
+                            })">🗑️ Eliminar</button>
+                        </td>
+                    `;
+            tbody.appendChild(tr);
+          });
+        } catch (error) {
+          mostrarMensaje("Error al cargar clientes: " + error.message, "error");
+        }
+      }
+
+      async function asignarCliente() {
+        if (!entrenadorActual) {
+          mostrarMensaje("Seleccione un entrenador primero", "error");
+          return;
+        }
+
+        const usuarioId = document.getElementById("usuarioSelect").value;
+
+        if (!usuarioId) {
+          mostrarMensaje("Seleccione un cliente", "error");
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/clientes`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ usuario_id: usuarioId }),
+            }
+          );
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Cliente asignado correctamente");
+            cargarClientes();
+            document.getElementById("usuarioSelect").value = "";
+          } else {
+            mostrarMensaje(result.message, "error");
+          }
+        } catch (error) {
+          mostrarMensaje("Error al asignar cliente: " + error.message, "error");
+        }
+      }
+
+      async function eliminarCliente(usuarioId) {
+        if (!confirm("¿Está seguro de eliminar este cliente del entrenador?"))
+          return;
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/clientes/${usuarioId}`,
+            {
+              method: "DELETE",
+            }
+          );
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Cliente eliminado correctamente");
+            cargarClientes();
+          } else {
+            mostrarMensaje(
+              result.message || "Error al eliminar cliente",
+              "error"
+            );
+          }
+        } catch (error) {
+          mostrarMensaje(
+            "Error al eliminar cliente: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      // SESIONES
+      async function cargarRutinas() {
+        try {
+          const response = await fetch(`${API_URL}/rutinas`);
+          const rutinas = await response.json();
+
+          const select = document.getElementById("sesion_rutina_id");
+          select.innerHTML = '<option value="">-- Seleccione --</option>';
+
+          rutinas.forEach((r) => {
+            const option = document.createElement("option");
+            option.value = r.id;
+            option.textContent = `${r.nombre} - ${r.nivel_dificultad}`;
+            select.appendChild(option);
+          });
+        } catch (error) {
+          console.error("Error al cargar rutinas:", error);
+        }
+      }
+
+      async function cargarSesiones() {
+        if (!entrenadorActual) return;
+
+        const estadoFiltro = document.getElementById("filtro_estado").value;
+        let url = `${API_URL}/entrenadores/${entrenadorActual.id}/sesiones`;
+        if (estadoFiltro) {
+          url += `?estado=${estadoFiltro}`;
+        }
+
+        try {
+          const response = await fetch(url);
+          const sesiones = await response.json();
+
+          const tbody = document.querySelector("#tablaSesiones tbody");
+          tbody.innerHTML = "";
+
+          sesiones.forEach((s) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                        <td>${s.id}</td>
+                        <td>${s.usuario_nombre || "N/A"} ${
+              s.usuario_apellido || ""
+            }</td>
+                        <td>${s.rutina_nombre || "N/A"}</td>
+                        <td>${s.fecha_programada || s.fecha}</td>
+                        <td>${s.duracion_minutos || 0} min</td>
+                        <td><span class="badge ${s.estado}">${
+              s.estado
+            }</span></td>
+                        <td class="actions">
+                            ${
+                              s.estado === "programada"
+                                ? `<button class="success" onclick="completarSesion(${s.id})">✅ Completar</button>`
+                                : ""
+                            }
+                            <button class="danger" onclick="eliminarSesion(${
+                              s.id
+                            })">🗑️ Eliminar</button>
+                        </td>
+                    `;
+            tbody.appendChild(tr);
+          });
+        } catch (error) {
+          mostrarMensaje("Error al cargar sesiones: " + error.message, "error");
+        }
+      }
+
+      async function crearSesion() {
+        if (!entrenadorActual) {
+          mostrarMensaje("Seleccione un entrenador primero", "error");
+          return;
+        }
+
+        const data = {
+          usuario_id: document.getElementById("sesion_usuario_id").value,
+          rutina_id: document.getElementById("sesion_rutina_id").value,
+          fecha: document.getElementById("sesion_fecha").value,
+          duracion_minutos: document.getElementById("sesion_duracion").value,
+          ubicacion: document.getElementById("sesion_ubicacion").value,
+          notas: document.getElementById("sesion_notas").value,
+        };
+
+        if (!data.usuario_id || !data.fecha) {
+          mostrarMensaje(
+            "Complete los campos requeridos (cliente y fecha)",
+            "error"
+          );
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/sesiones`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(data),
+            }
+          );
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Sesión creada correctamente");
+            cargarSesiones();
+            // Limpiar formulario
+            document.getElementById("sesion_usuario_id").value = "";
+            document.getElementById("sesion_rutina_id").value = "";
+            document.getElementById("sesion_fecha").value = "";
+            document.getElementById("sesion_duracion").value = "60";
+            document.getElementById("sesion_ubicacion").value = "";
+            document.getElementById("sesion_notas").value = "";
+          } else {
+            mostrarMensaje(result.message, "error");
+          }
+        } catch (error) {
+          mostrarMensaje("Error al crear sesión: " + error.message, "error");
+        }
+      }
+
+      async function completarSesion(sesionId) {
+        try {
+          const response = await fetch(`${API_URL}/sesiones/${sesionId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ estado: "completada" }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Sesión marcada como completada");
+            cargarSesiones();
+          } else {
+            mostrarMensaje(result.message, "error");
+          }
+        } catch (error) {
+          mostrarMensaje(
+            "Error al completar sesión: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      async function eliminarSesion(sesionId) {
+        if (!confirm("¿Está seguro de eliminar esta sesión?")) return;
+
+        try {
+          const response = await fetch(`${API_URL}/sesiones/${sesionId}`, {
+            method: "DELETE",
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Sesión eliminada correctamente");
+            cargarSesiones();
+          } else {
+            mostrarMensaje(result.message, "error");
+          }
+        } catch (error) {
+          mostrarMensaje("Error al eliminar sesión: " + error.message, "error");
+        }
+      }
+
+      // VALORACIONES
+      async function cargarValoraciones() {
+        if (!entrenadorActual) return;
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/valoraciones`
+          );
+          const valoraciones = await response.json();
+
+          const container = document.getElementById("listaValoraciones");
+          container.innerHTML = "";
+
+          if (valoraciones.length === 0) {
+            container.innerHTML = "<p>No hay valoraciones todavía</p>";
+            return;
+          }
+
+          valoraciones.forEach((v) => {
+            const estrellas = "⭐".repeat(v.puntuacion);
+            const card = document.createElement("div");
+            card.className = "card";
+            card.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div>
+                                <strong>${v.usuario_nombre || "Usuario"} ${
+              v.usuario_apellido || ""
+            }</strong>
+                                <div class="rating">${estrellas}</div>
+                                <p style="margin: 10px 0;">${
+                                  v.comentario || "Sin comentario"
+                                }</p>
+                                <small style="color: #666;">${
+                                  v.fecha_valoracion || ""
+                                }</small>
+                            </div>
+                            <button class="danger" onclick="eliminarValoracion(${
+                              v.id
+                            })">🗑️</button>
+                        </div>
+                    `;
+            container.appendChild(card);
+          });
+        } catch (error) {
+          mostrarMensaje(
+            "Error al cargar valoraciones: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      async function agregarValoracion() {
+        if (!entrenadorActual) {
+          mostrarMensaje("Seleccione un entrenador primero", "error");
+          return;
+        }
+
+        const data = {
+          usuario_id: document.getElementById("valoracion_usuario_id").value,
+          puntuacion: parseInt(
+            document.getElementById("valoracion_puntuacion").value
+          ),
+          comentario: document.getElementById("valoracion_comentario").value,
+        };
+
+        if (!data.usuario_id) {
+          mostrarMensaje("Seleccione un cliente", "error");
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/valoraciones`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(data),
+            }
+          );
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Valoración agregada correctamente");
+            cargarValoraciones();
+            document.getElementById("valoracion_usuario_id").value = "";
+            document.getElementById("valoracion_comentario").value = "";
+            document.getElementById("valoracion_puntuacion").value = "5";
+          } else {
+            mostrarMensaje(result.message, "error");
+          }
+        } catch (error) {
+          mostrarMensaje(
+            "Error al agregar valoración: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      async function eliminarValoracion(valoracionId) {
+        if (!confirm("¿Está seguro de eliminar esta valoración?")) return;
+
+        try {
+          const response = await fetch(
+            `${API_URL}/entrenadores/${entrenadorActual.id}/valoraciones/${valoracionId}`,
+            {
+              method: "DELETE",
+            }
+          );
+
+          const result = await response.json();
+
+          if (result.success) {
+            mostrarMensaje("Valoración eliminada correctamente");
+            cargarValoraciones();
+          } else {
+            mostrarMensaje(result.message, "error");
+          }
+        } catch (error) {
+          mostrarMensaje(
+            "Error al eliminar valoración: " + error.message,
+            "error"
+          );
+        }
+      }
+
+      // Inicializar
+      window.onload = () => {
+        cargarEntrenadores();
+      };
+    </script>
+  </body>
+</html>
