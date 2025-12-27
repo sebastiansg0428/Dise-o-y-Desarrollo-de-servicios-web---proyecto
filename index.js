@@ -22,6 +22,11 @@ const pool = mysql.createPool({
 
 // ==================== USUARIOS ====================
 
+// NOTA DE SEGURIDAD: Las contraseñas deberían estar hasheadas con bcrypt
+// Instalar: npm install bcrypt
+// Al registrar: const hashedPassword = await bcrypt.hash(password, 10);
+// Al login: const match = await bcrypt.compare(password, user.password);
+
 // Login
 app.post('/login', async (req, res) => {
     const { email, password } = req.body;
@@ -443,7 +448,7 @@ app.delete('/productos/:id', async (req, res) => {
     }
 });
 
-// Vender producto
+// Vender producto (con transacción para garantizar atomicidad)
 app.post('/productos/:id/vender', async (req, res) => {
     const { id } = req.params;
     const { cantidad, usuario_id, metodo_pago = 'efectivo' } = req.body;
@@ -452,42 +457,55 @@ app.post('/productos/:id/vender', async (req, res) => {
         return res.status(400).json({ success: false, message: 'Cantidad inválida' });
     }
     
+    const connection = await pool.promise().getConnection();
+    
     try {
-        // Verificar producto y stock
-        const [producto] = await pool.promise().query(
-            'SELECT nombre, stock, precio_venta FROM productos WHERE id = ? AND estado = "activo"',
+        await connection.beginTransaction();
+        
+        // Verificar producto y stock con bloqueo
+        const [producto] = await connection.query(
+            'SELECT nombre, stock, precio_venta FROM productos WHERE id = ? AND estado = "activo" FOR UPDATE',
             [id]
         );
         
         if (producto.length === 0) {
+            await connection.rollback();
             return res.status(404).json({ success: false, message: 'Producto no encontrado o inactivo' });
         }
         
         if (producto[0].stock < cantidad) {
-            return res.status(400).json({ success: false, message: 'Stock insuficiente' });
+            await connection.rollback();
+            return res.status(400).json({ success: false, message: `Stock insuficiente. Disponible: ${producto[0].stock}` });
         }
         
         const total = producto[0].precio_venta * cantidad;
         
         // Registrar venta
-        await pool.promise().query(
+        await connection.query(
             'INSERT INTO ventas (usuario_id, producto_id, cantidad, precio_unitario, total, metodo_pago) VALUES (?, ?, ?, ?, ?, ?)',
             [usuario_id, id, cantidad, producto[0].precio_venta, total, metodo_pago]
         );
         
         // Actualizar stock
-        await pool.promise().query(
-            'UPDATE productos SET stock = stock - ? WHERE id = ?',
+        await connection.query(
+            'UPDATE productos SET stock = stock - ?, updated_at = NOW() WHERE id = ?',
             [cantidad, id]
         );
+        
+        await connection.commit();
         
         res.json({ 
             success: true, 
             message: `Venta registrada: ${cantidad} x ${producto[0].nombre}`,
-            total: total
+            total: total,
+            stock_restante: producto[0].stock - cantidad
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Error al procesar venta' });
+        await connection.rollback();
+        console.error('Error en venta:', error);
+        res.status(500).json({ success: false, message: 'Error al procesar venta', error: error.message });
+    } finally {
+        connection.release();
     }
 });
 
@@ -556,6 +574,481 @@ app.get('/ventas', async (req, res) => {
 
     try {
         const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==================== ENTRENADORES ====================
+
+// Estadísticas de entrenadores (DEBE IR ANTES de /entrenadores/:id)
+app.get('/entrenadores/estadisticas', async (req, res) => {
+    try {
+        const [stats] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_entrenadores,
+                SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as entrenadores_activos,
+                AVG(tarifa_rutina) as tarifa_promedio
+            FROM entrenadores
+        `);
+
+        const [ranking] = await pool.promise().query(`
+            SELECT e.id, e.nombre, e.apellido, e.especialidad_principal,
+                   COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
+                   COUNT(DISTINCT ec.usuario_id) as total_clientes
+            FROM entrenadores e
+            LEFT JOIN valoraciones_entrenadores v ON v.entrenador_id = e.id
+            LEFT JOIN entrenadores_clientes ec ON ec.entrenador_id = e.id
+            WHERE e.estado = 'activo'
+            GROUP BY e.id
+            ORDER BY promedio_puntuacion DESC, total_clientes DESC
+            LIMIT 5
+        `);
+
+        res.json({ ...stats[0], top_entrenadores: ranking });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Listar entrenadores con métricas
+app.get('/entrenadores', async (req, res) => {
+    const { especialidad, estado } = req.query;
+
+    let query = `
+        SELECT e.id, e.nombre, e.apellido, e.email, e.telefono, e.genero, e.fecha_nacimiento,
+               e.especialidad_principal, e.experiencia_anios, e.certificaciones, e.biografia,
+               e.tarifa_rutina, e.estado,
+               DATE_FORMAT(e.created_at, "%d/%m/%Y") as fecha_alta,
+               COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
+               COALESCE(COUNT(DISTINCT ec.usuario_id), 0) as total_clientes
+        FROM entrenadores e
+        LEFT JOIN valoraciones_entrenadores v ON v.entrenador_id = e.id
+        LEFT JOIN entrenadores_clientes ec ON ec.entrenador_id = e.id AND ec.estado = 'activo'
+        WHERE 1=1
+    `;
+
+    const params = [];
+
+    if (especialidad) {
+        query += ' AND e.especialidad_principal = ?';
+        params.push(especialidad);
+    }
+    if (estado) {
+        query += ' AND e.estado = ?';
+        params.push(estado);
+    }
+
+    query += ' GROUP BY e.id ORDER BY promedio_puntuacion DESC, e.experiencia_anios DESC';
+
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ver entrenador individual (con horarios y métricas)
+app.get('/entrenadores/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [entrenadores] = await pool.promise().query(
+            `SELECT e.*, COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
+                    COALESCE(COUNT(DISTINCT ec.usuario_id), 0) as total_clientes
+             FROM entrenadores e
+             LEFT JOIN valoraciones_entrenadores v ON v.entrenador_id = e.id
+             LEFT JOIN entrenadores_clientes ec ON ec.entrenador_id = e.id
+             WHERE e.id = ?
+             GROUP BY e.id`,
+            [id]
+        );
+
+        if (entrenadores.length === 0) {
+            return res.status(404).json({ success: false, message: 'Entrenador no encontrado' });
+        }
+
+        const [horarios] = await pool.promise().query(
+            'SELECT * FROM entrenadores_horarios WHERE entrenador_id = ? ORDER BY FIELD(dia_semana, "lunes","martes","miercoles","jueves","viernes","sabado","domingo"), hora_inicio',
+            [id]
+        );
+
+        res.json({
+            ...entrenadores[0],
+            horarios
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Crear entrenador
+app.post('/entrenadores', async (req, res) => {
+    const { nombre, apellido, email, telefono, genero, fecha_nacimiento, especialidad_principal, experiencia_anios, certificaciones, biografia, tarifa_rutina } = req.body;
+
+    if (!nombre || !email) {
+        return res.status(400).json({ success: false, message: 'Nombre y email son requeridos' });
+    }
+
+    try {
+        const [result] = await pool.promise().query(
+            `INSERT INTO entrenadores (nombre, apellido, email, telefono, genero, fecha_nacimiento, especialidad_principal, experiencia_anios, certificaciones, biografia, tarifa_rutina, estado)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')`,
+            [nombre, apellido, email, telefono, genero, fecha_nacimiento, especialidad_principal || 'fuerza', experiencia_anios || 0, certificaciones, biografia, tarifa_rutina || 0.00]
+        );
+
+        // Obtener el entrenador recién creado con todas sus métricas
+        const [nuevoEntrenador] = await pool.promise().query(
+            `SELECT e.id, e.nombre, e.apellido, e.email, e.telefono, e.genero, e.fecha_nacimiento,
+                    e.especialidad_principal, e.experiencia_anios, e.certificaciones, e.biografia,
+                    e.tarifa_rutina, e.estado,
+                    DATE_FORMAT(e.created_at, "%d/%m/%Y") as fecha_alta,
+                    COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
+                    COALESCE(COUNT(DISTINCT ec.usuario_id), 0) as total_clientes
+             FROM entrenadores e
+             LEFT JOIN valoraciones_entrenadores v ON v.entrenador_id = e.id
+             LEFT JOIN entrenadores_clientes ec ON ec.entrenador_id = e.id AND ec.estado = 'activo'
+             WHERE e.id = ?
+             GROUP BY e.id`,
+            [result.insertId]
+        );
+
+        res.status(201).json({ 
+            success: true, 
+            id: result.insertId,
+            message: 'Entrenador creado exitosamente',
+            entrenador: nuevoEntrenador[0]
+        });
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ success: false, message: 'El email de entrenador ya existe' });
+        }
+        console.error('Error al crear entrenador:', error);
+        res.status(500).json({ success: false, message: 'Error al crear entrenador', error: error.message });
+    }
+});
+
+// Actualizar entrenador
+app.put('/entrenadores/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nombre, apellido, email, telefono, genero, fecha_nacimiento, especialidad_principal, experiencia_anios, certificaciones, biografia, tarifa_rutina, estado } = req.body;
+
+    const updates = [];
+    const values = [];
+
+    if (nombre) { updates.push('nombre = ?'); values.push(nombre); }
+    if (apellido) { updates.push('apellido = ?'); values.push(apellido); }
+    if (email) { updates.push('email = ?'); values.push(email); }
+    if (telefono) { updates.push('telefono = ?'); values.push(telefono); }
+    if (genero) { updates.push('genero = ?'); values.push(genero); }
+    if (fecha_nacimiento) { updates.push('fecha_nacimiento = ?'); values.push(fecha_nacimiento); }
+    if (especialidad_principal) { updates.push('especialidad_principal = ?'); values.push(especialidad_principal); }
+    if (experiencia_anios !== undefined) { updates.push('experiencia_anios = ?'); values.push(experiencia_anios); }
+    if (certificaciones !== undefined) { updates.push('certificaciones = ?'); values.push(certificaciones); }
+    if (biografia !== undefined) { updates.push('biografia = ?'); values.push(biografia); }
+    if (tarifa_rutina !== undefined) { updates.push('tarifa_rutina = ?'); values.push(tarifa_rutina); }
+    if (estado) { updates.push('estado = ?'); values.push(estado); }
+
+    if (updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+    }
+
+    values.push(id);
+
+    try {
+        const [result] = await pool.promise().query(
+            `UPDATE entrenadores SET ${updates.join(', ')}, updated_at = NOW() WHERE id = ?`,
+            values
+        );
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Entrenador no encontrado' });
+        }
+        res.json({ success: true, message: 'Entrenador actualizado correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al actualizar entrenador' });
+    }
+});
+
+// Eliminar entrenador
+app.delete('/entrenadores/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [result] = await pool.promise().query('DELETE FROM entrenadores WHERE id = ?', [id]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Entrenador no encontrado' });
+        }
+        res.json({ success: true, message: 'Entrenador eliminado correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al eliminar entrenador' });
+    }
+});
+
+// Horarios del entrenador
+app.get('/entrenadores/:id/horarios', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [rows] = await pool.promise().query('SELECT * FROM entrenadores_horarios WHERE entrenador_id = ? ORDER BY dia_semana, hora_inicio', [id]);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/entrenadores/:id/horarios', async (req, res) => {
+    const { id } = req.params;
+    const { dia_semana, hora_inicio, hora_fin, disponible } = req.body;
+
+    if (!dia_semana || !hora_inicio || !hora_fin) {
+        return res.status(400).json({ success: false, message: 'dia_semana, hora_inicio y hora_fin son requeridos' });
+    }
+
+    // Validar que hora_fin sea mayor que hora_inicio
+    if (hora_inicio >= hora_fin) {
+        return res.status(400).json({ success: false, message: 'La hora de fin debe ser posterior a la hora de inicio' });
+    }
+
+    try {
+        // Verificar que no exista solapamiento de horarios
+        const [solapados] = await pool.promise().query(
+            `SELECT id FROM entrenadores_horarios 
+             WHERE entrenador_id = ? AND dia_semana = ? 
+             AND ((hora_inicio < ? AND hora_fin > ?) 
+                  OR (hora_inicio < ? AND hora_fin > ?)
+                  OR (hora_inicio >= ? AND hora_fin <= ?))`,
+            [id, dia_semana, hora_fin, hora_inicio, hora_fin, hora_fin, hora_inicio, hora_fin]
+        );
+
+        if (solapados.length > 0) {
+            return res.status(409).json({ success: false, message: 'El horario se solapa con otro existente' });
+        }
+
+        const [result] = await pool.promise().query(
+            `INSERT INTO entrenadores_horarios (entrenador_id, dia_semana, hora_inicio, hora_fin, disponible)
+             VALUES (?, ?, ?, ?, COALESCE(?, 1))`,
+            [id, dia_semana, hora_inicio, hora_fin, disponible]
+        );
+        res.status(201).json({ success: true, id: result.insertId, message: 'Horario creado exitosamente' });
+    } catch (error) {
+        console.error('Error al crear horario:', error);
+        res.status(500).json({ success: false, message: 'Error al crear horario', error: error.message });
+    }
+});
+
+app.delete('/entrenadores/:id/horarios/:horario_id', async (req, res) => {
+    const { id, horario_id } = req.params;
+    try {
+        const [result] = await pool.promise().query('DELETE FROM entrenadores_horarios WHERE entrenador_id = ? AND id = ?', [id, horario_id]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Horario no encontrado' });
+        }
+        res.json({ success: true, message: 'Horario eliminado' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al eliminar horario' });
+    }
+});
+
+// Asignación de clientes a entrenador
+app.post('/entrenadores/:entrenador_id/clientes/:usuario_id', async (req, res) => {
+    const { entrenador_id, usuario_id } = req.params;
+    const { notas } = req.body;
+    try {
+        const [result] = await pool.promise().query(
+            `INSERT INTO entrenadores_clientes (entrenador_id, usuario_id, notas)
+             VALUES (?, ?, ?)`,
+            [entrenador_id, usuario_id, notas]
+        );
+        res.status(201).json({ success: true, id: result.insertId, message: 'Cliente asignado al entrenador' });
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ success: false, message: 'El cliente ya está asignado a este entrenador' });
+        }
+        res.status(500).json({ success: false, message: 'Error al asignar cliente' });
+    }
+});
+
+app.get('/entrenadores/:entrenador_id/clientes', async (req, res) => {
+    const { entrenador_id } = req.params;
+    const { estado } = req.query;
+    let query = `
+        SELECT ec.id as asignacion_id, ec.estado, ec.fecha_asignacion, ec.notas,
+               u.id as usuario_id, u.nombre, u.apellido, u.email, u.membresia
+        FROM entrenadores_clientes ec
+        INNER JOIN usuarios u ON u.id = ec.usuario_id
+        WHERE ec.entrenador_id = ?
+    `;
+    const params = [entrenador_id];
+    if (estado) { query += ' AND ec.estado = ?'; params.push(estado); }
+    query += ' ORDER BY ec.fecha_asignacion DESC';
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/entrenadores/:entrenador_id/clientes/:usuario_id', async (req, res) => {
+    const { entrenador_id, usuario_id } = req.params;
+    try {
+        const [result] = await pool.promise().query('DELETE FROM entrenadores_clientes WHERE entrenador_id = ? AND usuario_id = ?', [entrenador_id, usuario_id]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Asignación no encontrada' });
+        }
+        res.json({ success: true, message: 'Cliente desasignado del entrenador' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al desasignar cliente' });
+    }
+});
+
+// Sesiones de entrenamiento
+app.post('/entrenadores/:entrenador_id/sesiones', async (req, res) => {
+    const { entrenador_id } = req.params;
+    const { usuario_id, rutina_id, fecha, duracion_minutos, tipo, ubicacion, notas } = req.body;
+
+    if (!usuario_id || !fecha) {
+        return res.status(400).json({ success: false, message: 'usuario_id y fecha son requeridos' });
+    }
+
+    try {
+        // Verificar que el entrenador esté activo
+        const [entrenador] = await pool.promise().query(
+            'SELECT estado FROM entrenadores WHERE id = ?', [entrenador_id]
+        );
+        
+        if (entrenador.length === 0) {
+            return res.status(404).json({ success: false, message: 'Entrenador no encontrado' });
+        }
+        
+        if (entrenador[0].estado !== 'activo') {
+            return res.status(400).json({ success: false, message: 'El entrenador no está activo' });
+        }
+
+        // Verificar que el usuario exista y esté activo
+        const [usuario] = await pool.promise().query(
+            'SELECT estado FROM usuarios WHERE id = ?', [usuario_id]
+        );
+        
+        if (usuario.length === 0 || usuario[0].estado !== 'activo') {
+            return res.status(400).json({ success: false, message: 'Usuario no encontrado o inactivo' });
+        }
+
+        // Verificar conflictos de horario del entrenador
+        const duracion = duracion_minutos || 60;
+        const [conflictos] = await pool.promise().query(
+            `SELECT id FROM sesiones_entrenamiento 
+             WHERE entrenador_id = ? 
+             AND estado NOT IN ('cancelada', 'completada')
+             AND (
+                 (fecha <= ? AND DATE_ADD(fecha, INTERVAL duracion_minutos MINUTE) > ?)
+                 OR (fecha < DATE_ADD(?, INTERVAL ? MINUTE) AND fecha >= ?)
+             )`,
+            [entrenador_id, fecha, fecha, fecha, duracion, fecha]
+        );
+
+        if (conflictos.length > 0) {
+            return res.status(409).json({ success: false, message: 'El entrenador ya tiene una sesión programada en ese horario' });
+        }
+
+        const [result] = await pool.promise().query(
+            `INSERT INTO sesiones_entrenamiento (entrenador_id, usuario_id, rutina_id, fecha, duracion_minutos, tipo, ubicacion, notas)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [entrenador_id, usuario_id, rutina_id || null, fecha, duracion, tipo || 'personal', ubicacion || 'gimnasio', notas]
+        );
+        res.status(201).json({ success: true, id: result.insertId, message: 'Sesión creada exitosamente' });
+    } catch (error) {
+        console.error('Error al crear sesión:', error);
+        res.status(500).json({ success: false, message: 'Error al crear sesión', error: error.message });
+    }
+});
+
+app.get('/entrenadores/:entrenador_id/sesiones', async (req, res) => {
+    const { entrenador_id } = req.params;
+    const { estado, desde, hasta } = req.query;
+    let query = `
+        SELECT s.*, u.nombre as usuario_nombre, r.nombre as rutina_nombre,
+               DATE_FORMAT(s.fecha, "%d/%m/%Y %H:%i") as fecha_programada
+        FROM sesiones_entrenamiento s
+        LEFT JOIN usuarios u ON u.id = s.usuario_id
+        LEFT JOIN rutinas r ON r.id = s.rutina_id
+        WHERE s.entrenador_id = ?
+    `;
+    const params = [entrenador_id];
+    if (estado) { query += ' AND s.estado = ?'; params.push(estado); }
+    if (desde) { query += ' AND DATE(s.fecha) >= ?'; params.push(desde); }
+    if (hasta) { query += ' AND DATE(s.fecha) <= ?'; params.push(hasta); }
+    query += ' ORDER BY s.fecha DESC';
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Actualizar sesión
+app.put('/sesiones/:id', async (req, res) => {
+    const { id } = req.params;
+    const { estado, duracion_minutos, ubicacion, notas, calorias_estimadas } = req.body;
+
+    const updates = [];
+    const values = [];
+    if (estado) { updates.push('estado = ?'); values.push(estado); }
+    if (duracion_minutos !== undefined) { updates.push('duracion_minutos = ?'); values.push(duracion_minutos); }
+    if (ubicacion) { updates.push('ubicacion = ?'); values.push(ubicacion); }
+    if (notas !== undefined) { updates.push('notas = ?'); values.push(notas); }
+    if (calorias_estimadas !== undefined) { updates.push('calorias_estimadas = ?'); values.push(calorias_estimadas); }
+
+    if (estado === 'completada') {
+        updates.push('updated_at = NOW()');
+    }
+
+    if (updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+    }
+
+    values.push(id);
+    try {
+        const [result] = await pool.promise().query(`UPDATE sesiones_entrenamiento SET ${updates.join(', ')} WHERE id = ?`, values);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Sesión no encontrada' });
+        }
+        res.json({ success: true, message: 'Sesión actualizada' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al actualizar sesión' });
+    }
+});
+
+// Valoraciones de entrenadores
+app.post('/entrenadores/:entrenador_id/valoraciones', async (req, res) => {
+    const { entrenador_id } = req.params;
+    const { usuario_id, puntuacion, comentario } = req.body;
+    if (!usuario_id || !puntuacion) {
+        return res.status(400).json({ success: false, message: 'usuario_id y puntuacion son requeridos' });
+    }
+    try {
+        const [result] = await pool.promise().query(
+            `INSERT INTO valoraciones_entrenadores (entrenador_id, usuario_id, puntuacion, comentario)
+             VALUES (?, ?, ?, ?)`,
+            [entrenador_id, usuario_id, puntuacion, comentario]
+        );
+        res.status(201).json({ success: true, id: result.insertId, message: 'Valoración registrada' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al registrar valoración' });
+    }
+});
+
+app.get('/entrenadores/:entrenador_id/valoraciones', async (req, res) => {
+    const { entrenador_id } = req.params;
+    try {
+        const [rows] = await pool.promise().query(
+            `SELECT v.*, u.nombre as usuario_nombre
+             FROM valoraciones_entrenadores v
+             INNER JOIN usuarios u ON u.id = v.usuario_id
+             WHERE v.entrenador_id = ?
+             ORDER BY v.created_at DESC`,
+            [entrenador_id]
+        );
         res.json(rows);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -1177,4 +1670,22 @@ app.listen(port, () => {
     console.log('  GET /usuarios/:usuario_id/rutinas - Ver rutinas de usuario');
     console.log('  PUT /usuarios/:usuario_id/rutinas/:asignacion_id - Actualizar progreso de rutina');
     console.log('  GET /rutinas/estadisticas - Estadísticas de rutinas');
+    console.log('\n🏋️ ENTRENADORES:');
+    console.log('  GET /entrenadores - Listar entrenadores (filtros: ?especialidad=fuerza&estado=activo)');
+    console.log('  GET /entrenadores/:id - Ver entrenador con horarios');
+    console.log('  POST /entrenadores - Crear entrenador');
+    console.log('  PUT /entrenadores/:id - Actualizar entrenador');
+    console.log('  DELETE /entrenadores/:id - Eliminar entrenador');
+    console.log('  GET /entrenadores/:id/horarios - Listar horarios');
+    console.log('  POST /entrenadores/:id/horarios - Crear horario');
+    console.log('  DELETE /entrenadores/:id/horarios/:horario_id - Eliminar horario');
+    console.log('  POST /entrenadores/:entrenador_id/clientes/:usuario_id - Asignar cliente');
+    console.log('  GET /entrenadores/:entrenador_id/clientes - Ver clientes del entrenador');
+    console.log('  DELETE /entrenadores/:entrenador_id/clientes/:usuario_id - Quitar cliente');
+    console.log('  POST /entrenadores/:entrenador_id/sesiones - Crear sesión');
+    console.log('  GET /entrenadores/:entrenador_id/sesiones - Listar sesiones');
+    console.log('  PUT /sesiones/:id - Actualizar sesión');
+    console.log('  POST /entrenadores/:entrenador_id/valoraciones - Crear valoración');
+    console.log('  GET /entrenadores/:entrenador_id/valoraciones - Listar valoraciones');
+    console.log('  GET /entrenadores/estadisticas - Estadísticas de entrenadores');
 });
