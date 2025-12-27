@@ -619,7 +619,7 @@ app.get('/entrenadores', async (req, res) => {
     let query = `
         SELECT e.id, e.nombre, e.apellido, e.email, e.telefono, e.genero, e.fecha_nacimiento,
                e.especialidad_principal, e.experiencia_anios, e.certificaciones, e.biografia,
-               e.tarifa_rutina, e.estado,
+               CAST(e.tarifa_rutina AS UNSIGNED) as tarifa_rutina, e.estado,
                DATE_FORMAT(e.created_at, "%d/%m/%Y") as fecha_alta,
                COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
                COALESCE(COUNT(DISTINCT ec.usuario_id), 0) as total_clientes
@@ -655,7 +655,10 @@ app.get('/entrenadores/:id', async (req, res) => {
     const { id } = req.params;
     try {
         const [entrenadores] = await pool.promise().query(
-            `SELECT e.*, COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
+            `SELECT e.id, e.nombre, e.apellido, e.email, e.telefono, e.genero, e.fecha_nacimiento,
+                    e.especialidad_principal, e.experiencia_anios, e.certificaciones, e.biografia,
+                    CAST(e.tarifa_rutina AS UNSIGNED) as tarifa_rutina, e.estado, e.created_at, e.updated_at,
+                    COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
                     COALESCE(COUNT(DISTINCT ec.usuario_id), 0) as total_clientes
              FROM entrenadores e
              LEFT JOIN valoraciones_entrenadores v ON v.entrenador_id = e.id
@@ -702,7 +705,7 @@ app.post('/entrenadores', async (req, res) => {
         const [nuevoEntrenador] = await pool.promise().query(
             `SELECT e.id, e.nombre, e.apellido, e.email, e.telefono, e.genero, e.fecha_nacimiento,
                     e.especialidad_principal, e.experiencia_anios, e.certificaciones, e.biografia,
-                    e.tarifa_rutina, e.estado,
+                    CAST(e.tarifa_rutina AS UNSIGNED) as tarifa_rutina, e.estado,
                     DATE_FORMAT(e.created_at, "%d/%m/%Y") as fecha_alta,
                     COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
                     COALESCE(COUNT(DISTINCT ec.usuario_id), 0) as total_clientes
