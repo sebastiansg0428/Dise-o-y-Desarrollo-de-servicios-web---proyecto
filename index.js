@@ -865,33 +865,11 @@ app.post('/entrenadores/:entrenador_id/clientes', async (req, res) => {
     const { entrenador_id } = req.params;
     const { usuario_id, notas } = req.body;
     
-    console.log(`[POST CLIENTE] Entrenador: ${entrenador_id}, Usuario: ${usuario_id}`);
-    
     if (!usuario_id) {
         return res.status(400).json({ success: false, message: 'usuario_id es requerido' });
     }
     
     try {
-        // Verificar que el entrenador existe
-        const [entrenador] = await pool.promise().query(
-            'SELECT id, estado FROM entrenadores WHERE id = ?',
-            [entrenador_id]
-        );
-        
-        if (entrenador.length === 0) {
-            return res.status(404).json({ success: false, message: 'Entrenador no encontrado' });
-        }
-        
-        // Verificar que el usuario existe
-        const [usuario] = await pool.promise().query(
-            'SELECT id, estado FROM usuarios WHERE id = ?',
-            [usuario_id]
-        );
-        
-        if (usuario.length === 0) {
-            return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
-        }
-        
         // Verificar si ya está asignado
         const [yaAsignado] = await pool.promise().query(
             'SELECT id FROM entrenadores_clientes WHERE entrenador_id = ? AND usuario_id = ?',
@@ -908,17 +886,12 @@ app.post('/entrenadores/:entrenador_id/clientes', async (req, res) => {
             [entrenador_id, usuario_id, notas || null]
         );
         
-        console.log(`[POST CLIENTE] Asignado correctamente. ID: ${result.insertId}`);
-        
         res.status(201).json({ 
             success: true, 
             id: result.insertId, 
-            message: 'Cliente asignado al entrenador correctamente',
-            entrenador_id: parseInt(entrenador_id),
-            usuario_id: parseInt(usuario_id)
+            message: 'Cliente asignado correctamente'
         });
     } catch (error) {
-        console.error('[POST CLIENTE] Error:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Error al asignar cliente',
@@ -951,47 +924,36 @@ app.get('/entrenadores/:entrenador_id/clientes', async (req, res) => {
 app.delete('/entrenadores/:entrenador_id/clientes/:usuario_id', async (req, res) => {
     const { entrenador_id, usuario_id } = req.params;
     
-    console.log(`[DELETE CLIENTE] Entrenador: ${entrenador_id}, Usuario: ${usuario_id}`);
+    // Validar que usuario_id no sea undefined o inválido
+    if (!usuario_id || usuario_id === 'undefined' || usuario_id === 'null') {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'ID de usuario inválido'
+        });
+    }
     
     try {
-        // Verificar que la asignación existe antes de eliminar
-        const [existe] = await pool.promise().query(
-            'SELECT * FROM entrenadores_clientes WHERE entrenador_id = ? AND usuario_id = ?',
-            [entrenador_id, usuario_id]
-        );
-        
-        if (existe.length === 0) {
-            console.log('[DELETE CLIENTE] Asignación no encontrada');
-            return res.status(404).json({ 
-                success: false, 
-                message: 'Asignación no encontrada',
-                entrenador_id: parseInt(entrenador_id),
-                usuario_id: parseInt(usuario_id)
-            });
-        }
-        
         const [result] = await pool.promise().query(
             'DELETE FROM entrenadores_clientes WHERE entrenador_id = ? AND usuario_id = ?',
             [entrenador_id, usuario_id]
         );
         
-        console.log(`[DELETE CLIENTE] Eliminado correctamente. Filas afectadas: ${result.affectedRows}`);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Cliente no encontrado en este entrenador'
+            });
+        }
         
-        res.status(200).json({ 
+        res.json({ 
             success: true, 
-            message: 'Cliente desasignado del entrenador correctamente',
-            entrenador_id: parseInt(entrenador_id),
-            usuario_id: parseInt(usuario_id),
-            affectedRows: result.affectedRows
+            message: 'Cliente eliminado correctamente'
         });
     } catch (error) {
-        console.error('[DELETE CLIENTE] Error:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Error al desasignar cliente',
-            error: error.message,
-            entrenador_id: parseInt(entrenador_id),
-            usuario_id: parseInt(usuario_id)
+            message: 'Error al eliminar cliente',
+            error: error.message
         });
     }
 });
@@ -1118,44 +1080,26 @@ app.put('/sesiones/:id', async (req, res) => {
 app.delete('/sesiones/:id', async (req, res) => {
     const { id } = req.params;
     
-    console.log(`[DELETE SESION] ID: ${id}`);
+    if (!id || id === 'undefined') {
+        return res.status(400).json({ success: false, message: 'ID de sesión inválido' });
+    }
     
     try {
-        // Verificar que la sesión existe
-        const [existe] = await pool.promise().query(
-            'SELECT id, estado FROM sesiones_entrenamiento WHERE id = ?',
-            [id]
-        );
-        
-        if (existe.length === 0) {
-            console.log('[DELETE SESION] Sesión no encontrada');
-            return res.status(404).json({ 
-                success: false, 
-                message: 'Sesión no encontrada',
-                id: parseInt(id)
-            });
-        }
-        
         const [result] = await pool.promise().query(
             'DELETE FROM sesiones_entrenamiento WHERE id = ?',
             [id]
         );
         
-        console.log(`[DELETE SESION] Eliminada correctamente. Filas afectadas: ${result.affectedRows}`);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Sesión no encontrada' });
+        }
         
-        res.status(200).json({ 
-            success: true, 
-            message: 'Sesión eliminada correctamente',
-            id: parseInt(id),
-            affectedRows: result.affectedRows
-        });
+        res.json({ success: true, message: 'Sesión eliminada correctamente' });
     } catch (error) {
-        console.error('[DELETE SESION] Error:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Error al eliminar sesión',
-            error: error.message,
-            id: parseInt(id)
+            error: error.message
         });
     }
 });
@@ -1254,48 +1198,490 @@ app.get('/entrenadores/:entrenador_id/valoraciones', async (req, res) => {
 app.delete('/entrenadores/:entrenador_id/valoraciones/:valoracion_id', async (req, res) => {
     const { entrenador_id, valoracion_id } = req.params;
     
-    console.log(`[DELETE VALORACION] Entrenador: ${entrenador_id}, Valoracion: ${valoracion_id}`);
+    if (!valoracion_id || valoracion_id === 'undefined') {
+        return res.status(400).json({ success: false, message: 'ID de valoración inválido' });
+    }
     
     try {
-        // Verificar que la valoración existe
-        const [existe] = await pool.promise().query(
-            'SELECT id FROM valoraciones_entrenadores WHERE id = ? AND entrenador_id = ?',
-            [valoracion_id, entrenador_id]
-        );
-        
-        if (existe.length === 0) {
-            console.log('[DELETE VALORACION] Valoración no encontrada');
-            return res.status(404).json({ 
-                success: false, 
-                message: 'Valoración no encontrada',
-                entrenador_id: parseInt(entrenador_id),
-                valoracion_id: parseInt(valoracion_id)
-            });
-        }
-        
         const [result] = await pool.promise().query(
             'DELETE FROM valoraciones_entrenadores WHERE id = ? AND entrenador_id = ?',
             [valoracion_id, entrenador_id]
         );
         
-        console.log(`[DELETE VALORACION] Eliminada correctamente. Filas afectadas: ${result.affectedRows}`);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Valoración no encontrada' });
+        }
         
-        res.status(200).json({ 
-            success: true, 
-            message: 'Valoración eliminada correctamente',
-            entrenador_id: parseInt(entrenador_id),
-            valoracion_id: parseInt(valoracion_id),
-            affectedRows: result.affectedRows
-        });
+        res.json({ success: true, message: 'Valoración eliminada correctamente' });
     } catch (error) {
-        console.error('[DELETE VALORACION] Error:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Error al eliminar valoración',
-            error: error.message,
-            entrenador_id: parseInt(entrenador_id),
-            valoracion_id: parseInt(valoracion_id)
+            error: error.message
         });
+    }
+});
+
+// ==================== PAGOS Y FACTURAS ====================
+
+// Estadísticas de pagos
+app.get('/pagos/estadisticas', async (req, res) => {
+    try {
+        const [stats] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_pagos,
+                SUM(CASE WHEN estado = 'pagado' THEN 1 ELSE 0 END) as pagos_completados,
+                SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pagos_pendientes,
+                SUM(CASE WHEN estado = 'pagado' THEN monto ELSE 0 END) as ingresos_totales,
+                SUM(CASE WHEN estado = 'pendiente' THEN monto ELSE 0 END) as por_cobrar,
+                COUNT(CASE WHEN DATE(fecha_pago) = CURDATE() THEN 1 END) as pagos_hoy,
+                SUM(CASE WHEN DATE(fecha_pago) = CURDATE() AND estado = 'pagado' THEN monto ELSE 0 END) as ingresos_hoy
+            FROM pagos
+        `);
+        
+        const [porMetodo] = await pool.promise().query(`
+            SELECT metodo_pago, COUNT(*) as cantidad, SUM(monto) as total
+            FROM pagos
+            WHERE estado = 'pagado'
+            GROUP BY metodo_pago
+        `);
+        
+        const [porTipo] = await pool.promise().query(`
+            SELECT tipo_pago, COUNT(*) as cantidad, SUM(monto) as total
+            FROM pagos
+            WHERE estado = 'pagado'
+            GROUP BY tipo_pago
+        `);
+        
+        res.json({
+            ...stats[0],
+            por_metodo: porMetodo,
+            por_tipo: porTipo
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Listar pagos
+app.get('/pagos', async (req, res) => {
+    const { usuario_id, tipo_pago, estado, metodo_pago, fecha_desde, fecha_hasta } = req.query;
+    
+    let query = `
+        SELECT p.id, p.usuario_id, p.tipo_pago, p.concepto, p.monto, p.metodo_pago, 
+               p.estado, p.fecha_vencimiento, p.comprobante,
+               DATE_FORMAT(p.fecha_pago, "%d/%m/%Y %H:%i") as fecha_pago,
+               DATE_FORMAT(p.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
+               u.nombre as usuario_nombre, u.apellido as usuario_apellido, u.email as usuario_email
+        FROM pagos p
+        INNER JOIN usuarios u ON p.usuario_id = u.id
+        WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    if (usuario_id) {
+        query += ' AND p.usuario_id = ?';
+        params.push(usuario_id);
+    }
+    
+    if (tipo_pago) {
+        query += ' AND p.tipo_pago = ?';
+        params.push(tipo_pago);
+    }
+    
+    if (estado) {
+        query += ' AND p.estado = ?';
+        params.push(estado);
+    }
+    
+    if (metodo_pago) {
+        query += ' AND p.metodo_pago = ?';
+        params.push(metodo_pago);
+    }
+    
+    if (fecha_desde) {
+        query += ' AND DATE(p.fecha_pago) >= ?';
+        params.push(fecha_desde);
+    }
+    
+    if (fecha_hasta) {
+        query += ' AND DATE(p.fecha_pago) <= ?';
+        params.push(fecha_hasta);
+    }
+    
+    query += ' ORDER BY p.created_at DESC LIMIT 100';
+    
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ver pago individual
+app.get('/pagos/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [rows] = await pool.promise().query(
+            `SELECT p.*, 
+                    u.nombre as usuario_nombre, u.apellido as usuario_apellido, 
+                    u.email as usuario_email, u.telefono as usuario_telefono,
+                    DATE_FORMAT(p.fecha_pago, "%d/%m/%Y %H:%i") as fecha_pago_formatted,
+                    DATE_FORMAT(p.created_at, "%d/%m/%Y %H:%i") as fecha_registro_formatted
+             FROM pagos p
+             INNER JOIN usuarios u ON p.usuario_id = u.id
+             WHERE p.id = ?`,
+            [id]
+        );
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Pago no encontrado' });
+        }
+        
+        res.json(rows[0]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Crear pago
+app.post('/pagos', async (req, res) => {
+    const { usuario_id, tipo_pago, concepto, monto, metodo_pago, fecha_vencimiento, comprobante, notas } = req.body;
+    
+    if (!usuario_id || !monto || !concepto) {
+        return res.status(400).json({ success: false, message: 'usuario_id, monto y concepto son requeridos' });
+    }
+    
+    if (monto <= 0) {
+        return res.status(400).json({ success: false, message: 'El monto debe ser mayor a cero' });
+    }
+    
+    try {
+        const [result] = await pool.promise().query(
+            `INSERT INTO pagos (usuario_id, tipo_pago, concepto, monto, metodo_pago, fecha_vencimiento, comprobante, notas, estado)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')`,
+            [usuario_id, tipo_pago || 'membresia', concepto, monto, metodo_pago || 'efectivo', fecha_vencimiento, comprobante, notas]
+        );
+        
+        res.status(201).json({
+            success: true,
+            id: result.insertId,
+            message: 'Pago registrado exitosamente'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al registrar pago', error: error.message });
+    }
+});
+
+// Marcar pago como pagado
+app.put('/pagos/:id/pagar', async (req, res) => {
+    const { id } = req.params;
+    const { metodo_pago, comprobante, fecha_pago } = req.body;
+    
+    try {
+        const updates = ['estado = ?'];
+        const values = ['pagado'];
+        
+        if (metodo_pago) {
+            updates.push('metodo_pago = ?');
+            values.push(metodo_pago);
+        }
+        
+        if (comprobante) {
+            updates.push('comprobante = ?');
+            values.push(comprobante);
+        }
+        
+        if (fecha_pago) {
+            updates.push('fecha_pago = ?');
+            values.push(fecha_pago);
+        } else {
+            updates.push('fecha_pago = NOW()');
+        }
+        
+        values.push(id);
+        
+        const [result] = await pool.promise().query(
+            `UPDATE pagos SET ${updates.join(', ')} WHERE id = ?`,
+            values
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Pago no encontrado' });
+        }
+        
+        res.json({ success: true, message: 'Pago marcado como pagado' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al actualizar pago', error: error.message });
+    }
+});
+
+// Cancelar pago
+app.put('/pagos/:id/cancelar', async (req, res) => {
+    const { id } = req.params;
+    const { notas } = req.body;
+    
+    try {
+        const [result] = await pool.promise().query(
+            'UPDATE pagos SET estado = ?, notas = ? WHERE id = ? AND estado = "pendiente"',
+            ['cancelado', notas, id]
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Pago no encontrado o ya no está pendiente' });
+        }
+        
+        res.json({ success: true, message: 'Pago cancelado' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al cancelar pago', error: error.message });
+    }
+});
+
+// Eliminar pago
+app.delete('/pagos/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [result] = await pool.promise().query('DELETE FROM pagos WHERE id = ?', [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Pago no encontrado' });
+        }
+        
+        res.json({ success: true, message: 'Pago eliminado correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al eliminar pago', error: error.message });
+    }
+});
+
+// Renovar membresía con pago (usa procedimiento almacenado)
+app.post('/pagos/renovar-membresia', async (req, res) => {
+    const { usuario_id, tipo_membresia, metodo_pago, comprobante } = req.body;
+    
+    if (!usuario_id || !tipo_membresia) {
+        return res.status(400).json({ success: false, message: 'usuario_id y tipo_membresia son requeridos' });
+    }
+    
+    if (!['basica', 'premium', 'vip'].includes(tipo_membresia)) {
+        return res.status(400).json({ success: false, message: 'Tipo de membresía inválido' });
+    }
+    
+    try {
+        const [result] = await pool.promise().query(
+            'CALL sp_renovar_membresia_con_pago(?, ?, ?, ?, @pago_id, @factura_numero)',
+            [usuario_id, tipo_membresia, metodo_pago || 'efectivo', comprobante]
+        );
+        
+        const [output] = await pool.promise().query('SELECT @pago_id as pago_id, @factura_numero as factura_numero');
+        
+        res.json({
+            success: true,
+            message: 'Membresía renovada exitosamente',
+            pago_id: output[0].pago_id,
+            factura_numero: output[0].factura_numero
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al renovar membresía', error: error.message });
+    }
+});
+
+// ==================== FACTURAS ====================
+
+// Listar facturas
+app.get('/facturas', async (req, res) => {
+    const { usuario_id, estado, fecha_desde, fecha_hasta } = req.query;
+    
+    let query = `
+        SELECT f.id, f.numero_factura, f.usuario_id, f.subtotal, f.impuesto, f.descuento, f.total, f.estado,
+               DATE_FORMAT(f.fecha_emision, "%d/%m/%Y") as fecha_emision,
+               DATE_FORMAT(f.fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
+               u.nombre as usuario_nombre, u.apellido as usuario_apellido, u.email as usuario_email,
+               p.metodo_pago, p.fecha_pago
+        FROM facturas f
+        INNER JOIN usuarios u ON f.usuario_id = u.id
+        LEFT JOIN pagos p ON f.pago_id = p.id
+        WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    if (usuario_id) {
+        query += ' AND f.usuario_id = ?';
+        params.push(usuario_id);
+    }
+    
+    if (estado) {
+        query += ' AND f.estado = ?';
+        params.push(estado);
+    }
+    
+    if (fecha_desde) {
+        query += ' AND DATE(f.fecha_emision) >= ?';
+        params.push(fecha_desde);
+    }
+    
+    if (fecha_hasta) {
+        query += ' AND DATE(f.fecha_emision) <= ?';
+        params.push(fecha_hasta);
+    }
+    
+    query += ' ORDER BY f.fecha_emision DESC LIMIT 100';
+    
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ver factura completa con detalles
+app.get('/facturas/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [factura] = await pool.promise().query(
+            `SELECT f.*, 
+                    u.nombre as usuario_nombre, u.apellido as usuario_apellido,
+                    u.email as usuario_email, u.telefono as usuario_telefono,
+                    u.direccion,
+                    DATE_FORMAT(f.fecha_emision, "%d/%m/%Y") as fecha_emision_formatted,
+                    DATE_FORMAT(f.fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento_formatted,
+                    p.metodo_pago, p.fecha_pago, p.comprobante
+             FROM facturas f
+             INNER JOIN usuarios u ON f.usuario_id = u.id
+             LEFT JOIN pagos p ON f.pago_id = p.id
+             WHERE f.id = ?`,
+            [id]
+        );
+        
+        if (factura.length === 0) {
+            return res.status(404).json({ success: false, message: 'Factura no encontrada' });
+        }
+        
+        const [detalles] = await pool.promise().query(
+            'SELECT * FROM facturas_detalles WHERE factura_id = ?',
+            [id]
+        );
+        
+        res.json({
+            ...factura[0],
+            detalles
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Crear factura
+app.post('/facturas', async (req, res) => {
+    const { usuario_id, pago_id, items, impuesto_porcentaje, descuento, notas, fecha_vencimiento } = req.body;
+    
+    if (!usuario_id || !items || items.length === 0) {
+        return res.status(400).json({ success: false, message: 'usuario_id e items son requeridos' });
+    }
+    
+    const connection = await pool.promise().getConnection();
+    
+    try {
+        await connection.beginTransaction();
+        
+        // Calcular subtotal
+        const subtotal = items.reduce((sum, item) => {
+            return sum + (item.cantidad * item.precio_unitario);
+        }, 0);
+        
+        // Calcular impuesto (por defecto 19%)
+        const porcentaje_impuesto = impuesto_porcentaje || 0.19;
+        const impuesto = subtotal * porcentaje_impuesto;
+        
+        // Calcular total
+        const total = subtotal + impuesto - (descuento || 0);
+        
+        // Generar número de factura
+        const [lastFactura] = await connection.query(
+            `SELECT COALESCE(MAX(CAST(SUBSTRING(numero_factura, 10) AS UNSIGNED)), 0) as ultimo
+             FROM facturas 
+             WHERE YEAR(fecha_emision) = YEAR(NOW())`
+        );
+        
+        const siguiente_numero = (lastFactura[0].ultimo || 0) + 1;
+        const numero_factura = `FAC-${new Date().getFullYear()}-${String(siguiente_numero).padStart(4, '0')}`;
+        
+        // Crear factura
+        const [facturaResult] = await connection.query(
+            `INSERT INTO facturas (numero_factura, pago_id, usuario_id, subtotal, impuesto, descuento, total, fecha_vencimiento, notas)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [numero_factura, pago_id || null, usuario_id, subtotal, impuesto, descuento || 0, total, fecha_vencimiento, notas]
+        );
+        
+        const factura_id = facturaResult.insertId;
+        
+        // Insertar detalles
+        for (const item of items) {
+            const subtotal_item = item.cantidad * item.precio_unitario;
+            await connection.query(
+                `INSERT INTO facturas_detalles (factura_id, descripcion, cantidad, precio_unitario, subtotal)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [factura_id, item.descripcion, item.cantidad, item.precio_unitario, subtotal_item]
+            );
+        }
+        
+        await connection.commit();
+        
+        res.status(201).json({
+            success: true,
+            id: factura_id,
+            numero_factura,
+            total,
+            message: 'Factura creada exitosamente'
+        });
+    } catch (error) {
+        await connection.rollback();
+        res.status(500).json({ success: false, message: 'Error al crear factura', error: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// Anular factura
+app.put('/facturas/:id/anular', async (req, res) => {
+    const { id } = req.params;
+    const { notas } = req.body;
+    
+    try {
+        const [result] = await pool.promise().query(
+            'UPDATE facturas SET estado = ?, notas = ? WHERE id = ? AND estado != "anulada"',
+            ['anulada', notas, id]
+        );
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Factura no encontrada o ya anulada' });
+        }
+        
+        res.json({ success: true, message: 'Factura anulada' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al anular factura', error: error.message });
+    }
+});
+
+// Eliminar factura
+app.delete('/facturas/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const [result] = await pool.promise().query('DELETE FROM facturas WHERE id = ?', [id]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Factura no encontrada' });
+        }
+        
+        res.json({ success: true, message: 'Factura eliminada correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al eliminar factura', error: error.message });
     }
 });
 
@@ -1938,4 +2324,33 @@ app.listen(port, () => {
     console.log('  PUT /sesiones/:id - Actualizar sesión');
     console.log('  DELETE /sesiones/:id - Eliminar sesión');
     console.log('  GET /sesiones/:id - Ver sesión individual');
+    console.log('\n🏷️ PAGOS:');
+    console.log('  GET /pagos - Listar pagos (filtros: ?usuario_id, tipo_pago, estado, fecha_desde, fecha_hasta)');
+    console.log('  GET /pagos/:id - Ver pago individual');
+    console.log('  POST /pagos - Crear pago');
+    console.log('  PUT /pagos/:id - Actualizar pago');
+    console.log('  DELETE /pagos/:id - Cancelar pago');
+    console.log('  POST /pagos/renovar-membresia - Renovar membresía con pago');
+    console.log('\n📊 ESTADÍSTICAS DE PAGOS:');
+    console.log('  GET /pagos/estadisticas - Estadísticas de pagos');
+    console.log('  GET /pagos/estadisticas/membresias - Estadísticas de membresías');
+    console.log('  GET /pagos/estadisticas/productos - Estadísticas de productos');
+    console.log('  GET /pagos/estadisticas/sesiones - Estadísticas de sesiones');
+    console.log('\n📄 REPORTES:');
+    console.log('  GET /reportes/ingresos-mensuales - Ingresos mensuales del año actual');
+    console.log('  GET /reportes/usuarios-nuevos-mensuales - Usuarios nuevos mensuales del año actual');
+    console.log('  GET /reportes/productos-mas-vendidos - Productos más vendidos');
+    console.log('  GET /reportes/rutinas-populares - Rutinas más populares');
+    console.log('  GET /reportes/usuarios-con-membresia-por-vencer - Usuarios con membresía por vencer');
+    console.log('  GET /reportes/usuarios-inactivos - Usuarios inactivos en los últimos 30 días');
+    console.log('  GET /reportes/ventas-por-usuario - Ventas por usuario');
+    console.log('  GET /reportes/ventas-por-producto - Ventas por producto');
+    
+    console.log('\n💳 FACTURAS:');
+    console.log('  GET /facturas - Listar facturas (filtros: ?usuario_id, estado, fecha_desde, fecha_hasta)');
+    console.log('  GET /facturas/:id - Ver factura completa con detalles');
+    console.log('  POST /facturas - Crear factura');
+    console.log('  PUT /facturas/:id - Actualizar factura');
+    console.log('  DELETE /facturas/:id - Eliminar factura');
+    
 });
