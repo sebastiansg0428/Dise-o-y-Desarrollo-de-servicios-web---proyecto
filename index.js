@@ -42,7 +42,7 @@ app.post('/login', async (req, res) => {
     
     try {
         const [rows] = await pool.promise().query(
-            'SELECT id, nombre, apellido, email, membresia, estado, fecha_vencimiento FROM usuarios WHERE email = ? AND password = ? AND estado = "activo"',
+            'SELECT id, nombre, apellido, email, telefono, genero, membresia, estado, fecha_vencimiento FROM usuarios WHERE email = ? AND password = ? AND estado = "activo"',
             [email, password]
         );
 
@@ -66,14 +66,14 @@ app.post('/login', async (req, res) => {
 
 // Registro
 app.post('/register', async (req, res) => {
-    const { nombre, apellido, email, password, telefono, fecha_nacimiento, genero, membresia = 'basica' } = req.body;
+    const { nombre, apellido, email, password, telefono, fecha_nacimiento, genero, membresia = 'dia' } = req.body;
 
     if (!nombre || !email || !password) {
         return res.status(400).json({ success: false, message: 'Nombre, email y password son requeridos' });
     }
 
-    const precios = { basica: 30.00, premium: 50.00, vip: 80.00 };
-    const precio_membresia = precios[membresia] || 30.00;
+    const precios = { dia: 4000, semanal: 30000, quincenal: 40000, mensual: 60000, anual: 600000 };
+    const precio_membresia = precios[membresia] || 4000;
     const fecha_vencimiento = new Date();
     fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1);
 
@@ -102,8 +102,8 @@ app.get('/usuarios', async (req, res) => {
     const { estado, membresia, vencidos } = req.query;
     
     let query = `
-        SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.membresia, u.estado, 
-               u.precio_membresia, u.total_visitas,
+        SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.genero, u.fecha_nacimiento, 
+               u.membresia, u.estado, u.precio_membresia, u.total_visitas,
                DATE_FORMAT(u.ultima_visita, "%d/%m/%Y %H:%i") as ultima_visita,
                DATE_FORMAT(u.fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
                DATE_FORMAT(u.created_at, "%d/%m/%Y") as fecha_registro,
@@ -174,10 +174,11 @@ app.put('/usuarios/:id', async (req, res) => {
     if (fecha_nacimiento) { updates.push('fecha_nacimiento = ?'); values.push(fecha_nacimiento); }
     if (genero) { updates.push('genero = ?'); values.push(genero); }
     if (membresia) { 
-        updates.push('membresia = ?', 'precio_membresia = ?'); 
+        updates.push('membresia = ?'); 
+        updates.push('precio_membresia = ?'); 
         values.push(membresia);
-        const precios = { basica: 30.00, premium: 50.00, vip: 80.00 };
-        values.push(precios[membresia] || 30.00);
+        const precios = { dia: 4000, semanal: 30000, quincenal: 40000, mensual: 60000, anual: 600000 };
+        values.push(precios[membresia] || 4000);
     }
     
     if (updates.length === 0) {
@@ -289,9 +290,11 @@ app.get('/usuarios/estadisticas', async (req, res) => {
                 SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as usuarios_activos,
                 SUM(CASE WHEN estado = 'inactivo' THEN 1 ELSE 0 END) as usuarios_inactivos,
                 SUM(CASE WHEN estado = 'suspendido' THEN 1 ELSE 0 END) as usuarios_suspendidos,
-                SUM(CASE WHEN membresia = 'basica' THEN 1 ELSE 0 END) as membresia_basica,
-                SUM(CASE WHEN membresia = 'premium' THEN 1 ELSE 0 END) as membresia_premium,
-                SUM(CASE WHEN membresia = 'vip' THEN 1 ELSE 0 END) as membresia_vip,
+                SUM(CASE WHEN membresia = 'dia' THEN 1 ELSE 0 END) as membresia_dia,
+                SUM(CASE WHEN membresia = 'semanal' THEN 1 ELSE 0 END) as membresia_semanal,
+                SUM(CASE WHEN membresia = 'quincenal' THEN 1 ELSE 0 END) as membresia_quincenal,
+                SUM(CASE WHEN membresia = 'mensual' THEN 1 ELSE 0 END) as membresia_mensual,
+                SUM(CASE WHEN membresia = 'anual' THEN 1 ELSE 0 END) as membresia_anual,
                 SUM(CASE WHEN fecha_vencimiento < CURDATE() THEN 1 ELSE 0 END) as membresias_vencidas,
                 COUNT(CASE WHEN DATE(ultima_visita) = CURDATE() THEN 1 END) as visitas_hoy,
                 SUM(precio_membresia) as ingresos_mensuales_potenciales,
@@ -594,6 +597,7 @@ app.get('/ventas', async (req, res) => {
 // Estadísticas de entrenadores (DEBE IR ANTES de /entrenadores/:id)
 app.get('/entrenadores/estadisticas', async (req, res) => {
     try {
+        // Estadísticas generales de entrenadores
         const [stats] = await pool.promise().query(`
             SELECT 
                 COUNT(*) as total_entrenadores,
@@ -602,6 +606,29 @@ app.get('/entrenadores/estadisticas', async (req, res) => {
             FROM entrenadores
         `);
 
+        // Total de clientes asignados a todos los entrenadores
+        const [clientesStats] = await pool.promise().query(`
+            SELECT COUNT(DISTINCT usuario_id) as total_clientes_asignados
+            FROM entrenadores_clientes
+            WHERE estado = 'activo'
+        `);
+
+        // Sesiones programadas (futuras)
+        const [sesionesStats] = await pool.promise().query(`
+            SELECT COUNT(*) as sesiones_programadas
+            FROM sesiones_entrenamiento
+            WHERE fecha_sesion >= CURDATE() AND estado IN ('pendiente', 'confirmada')
+        `);
+
+        // Estadísticas de valoraciones
+        const [valoracionesStats] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_valoraciones,
+                COALESCE(AVG(puntuacion), 0) as promedio_valoraciones
+            FROM valoraciones_entrenadores
+        `);
+
+        // Top 5 entrenadores mejor valorados
         const [ranking] = await pool.promise().query(`
             SELECT e.id, e.nombre, e.apellido, e.especialidad_principal,
                    COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
@@ -615,7 +642,14 @@ app.get('/entrenadores/estadisticas', async (req, res) => {
             LIMIT 5
         `);
 
-        res.json({ ...stats[0], top_entrenadores: ranking });
+        res.json({ 
+            ...stats[0],
+            total_clientes_asignados: clientesStats[0].total_clientes_asignados,
+            sesiones_programadas: sesionesStats[0].sesiones_programadas,
+            total_valoraciones: valoracionesStats[0].total_valoraciones,
+            promedio_valoraciones: parseFloat(valoracionesStats[0].promedio_valoraciones.toFixed(2)),
+            top_entrenadores: ranking 
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -905,7 +939,7 @@ app.get('/entrenadores/:entrenador_id/clientes', async (req, res) => {
     const { estado } = req.query;
     let query = `
         SELECT ec.id as asignacion_id, ec.estado, ec.fecha_asignacion, ec.notas,
-               u.id as usuario_id, u.nombre, u.apellido, u.email, u.membresia
+               u.id as usuario_id, u.nombre, u.apellido, u.email, u.telefono, u.genero, u.membresia
         FROM entrenadores_clientes ec
         INNER JOIN usuarios u ON u.id = ec.usuario_id
         WHERE ec.entrenador_id = ?
@@ -1465,8 +1499,8 @@ app.post('/pagos/renovar-membresia', async (req, res) => {
         return res.status(400).json({ success: false, message: 'usuario_id y tipo_membresia son requeridos' });
     }
     
-    if (!['basica', 'premium', 'vip'].includes(tipo_membresia)) {
-        return res.status(400).json({ success: false, message: 'Tipo de membresía inválido' });
+    if (!['dia', 'semanal', 'quincenal', 'mensual', 'anual'].includes(tipo_membresia)) {
+        return res.status(400).json({ success: false, message: 'Tipo de membresía inválido (opciones: dia, semanal, quincenal, mensual, anual)' });
     }
     
     try {
@@ -2345,7 +2379,7 @@ app.listen(port, () => {
     console.log('  GET /reportes/usuarios-inactivos - Usuarios inactivos en los últimos 30 días');
     console.log('  GET /reportes/ventas-por-usuario - Ventas por usuario');
     console.log('  GET /reportes/ventas-por-producto - Ventas por producto');
-    
+
     console.log('\n💳 FACTURAS:');
     console.log('  GET /facturas - Listar facturas (filtros: ?usuario_id, estado, fecha_desde, fecha_hasta)');
     console.log('  GET /facturas/:id - Ver factura completa con detalles');
