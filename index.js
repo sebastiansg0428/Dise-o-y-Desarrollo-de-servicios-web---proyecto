@@ -102,34 +102,67 @@ app.post('/register', async (req, res) => {
     }
 
     // Calcular precio y fecha de vencimiento según membresía
-    const precios = { dia: 4000, semanal: 30000, quincenal: 40000, mensual: 60000, anual: 600000 };
-    const precio_membresia = precios[membresia] || 4000;
+    const precios = { dia: 4000, diaria: 4000, semanal: 30000, quincenal: 40000, mensual: 60000, anual: 600000 };
+    const membresiaLower = membresia.toLowerCase().trim(); // Convertir a minúsculas y quitar espacios
+    const precio_membresia = precios[membresiaLower] || 4000;
     
-    const fecha_vencimiento = new Date();
-    switch(membresia) {
-        case 'dia': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 1); break;
-        case 'semanal': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 7); break;
-        case 'quincenal': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 15); break;
-        case 'mensual': fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1); break;
-        case 'anual': fecha_vencimiento.setFullYear(fecha_vencimiento.getFullYear() + 1); break;
-        default: fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1);
+    // Obtener fecha actual SIN zona horaria
+    const ahora = new Date();
+    const year = ahora.getFullYear();
+    const month = ahora.getMonth() + 1; // 1-12
+    const day = ahora.getDate();
+    
+    // Fecha de inicio es HOY
+    const fecha_inicio = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    
+    // Calcular días a sumar (normalizar nombres)
+    let diasASumar = 0;
+    switch(membresiaLower) {
+        case 'dia':
+        case 'diaria':
+            diasASumar = 1; 
+            break;
+        case 'semanal': 
+            diasASumar = 7; 
+            break;
+        case 'quincenal': 
+            diasASumar = 15; 
+            break;
+        case 'mensual': 
+            diasASumar = 30; 
+            break;
+        case 'anual': 
+            diasASumar = 365; 
+            break;
+        default: 
+            diasASumar = 30;
     }
+    
+    // Crear fecha de vencimiento sumando días
+    const inicioDate = new Date(year, month - 1, day);
+    inicioDate.setDate(inicioDate.getDate() + diasASumar);
+    
+    const fecha_vencimiento = `${inicioDate.getFullYear()}-${String(inicioDate.getMonth() + 1).padStart(2, '0')}-${String(inicioDate.getDate()).padStart(2, '0')}`;
+    
+    console.log('✅ REGISTRO:', { membresia: membresiaLower, inicio: fecha_inicio, vence: fecha_vencimiento, dias: diasASumar });
 
     try {
         const [result] = await pool.promise().query(
             `INSERT INTO usuarios 
              (nombre, apellido, email, password, telefono, fecha_nacimiento, genero, 
-              membresia, precio_membresia, fecha_vencimiento, ultima_visita, estado) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'activo')`,
+              membresia, precio_membresia, fecha_inicio_membresia, fecha_vencimiento, ultima_visita, estado) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'activo')`,
             [nombre, apellido, email, password, telefono, fecha_nacimiento, genero, 
-             membresia, precio_membresia, fecha_vencimiento]
+             membresiaLower, precio_membresia, fecha_inicio, fecha_vencimiento]
         );
 
         // Obtener el usuario recién creado (sin password)
         const [newUser] = await pool.promise().query(
             `SELECT id, nombre, apellido, email, telefono, genero, fecha_nacimiento,
                     membresia, estado, precio_membresia,
-                    DATE_FORMAT(fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento
+                    DATE_FORMAT(fecha_inicio_membresia, "%d/%m/%Y") as fecha_inicio_membresia,
+                    DATE_FORMAT(fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
+                    DATEDIFF(fecha_vencimiento, CURDATE()) as dias_restantes
              FROM usuarios WHERE id = ?`,
             [result.insertId]
         );
@@ -187,34 +220,67 @@ app.post('/admin/clientes', async (req, res) => {
     const finalPassword = password || `Gym${Math.random().toString(36).slice(-8)}`;
 
     // Calcular precio y fecha de vencimiento
-    const precios = { dia: 4000, semanal: 30000, quincenal: 40000, mensual: 60000, anual: 600000 };
-    const precio_membresia = precios[membresia] || 4000;
+    const precios = { dia: 4000, diaria: 4000, semanal: 30000, quincenal: 40000, mensual: 60000, anual: 600000 };
+    const membresiaLower = membresia.toLowerCase().trim(); // Convertir a minúsculas y quitar espacios
+    const precio_membresia = precios[membresiaLower] || 4000;
     
-    const fecha_vencimiento = new Date();
-    switch(membresia) {
-        case 'dia': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 1); break;
-        case 'semanal': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 7); break;
-        case 'quincenal': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 15); break;
-        case 'mensual': fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1); break;
-        case 'anual': fecha_vencimiento.setFullYear(fecha_vencimiento.getFullYear() + 1); break;
-        default: fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1);
+    // Obtener fecha actual SIN zona horaria
+    const ahora = new Date();
+    const year = ahora.getFullYear();
+    const month = ahora.getMonth() + 1; // 1-12
+    const day = ahora.getDate();
+    
+    // Fecha de inicio es HOY
+    const fecha_inicio = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    
+    // Calcular días a sumar (normalizar nombres)
+    let diasASumar = 0;
+    switch(membresiaLower) {
+        case 'dia':
+        case 'diaria':
+            diasASumar = 1; 
+            break;
+        case 'semanal': 
+            diasASumar = 7; 
+            break;
+        case 'quincenal': 
+            diasASumar = 15; 
+            break;
+        case 'mensual': 
+            diasASumar = 30; 
+            break;
+        case 'anual': 
+            diasASumar = 365; 
+            break;
+        default: 
+            diasASumar = 30;
     }
+    
+    // Crear fecha de vencimiento sumando días
+    const inicioDate = new Date(year, month - 1, day);
+    inicioDate.setDate(inicioDate.getDate() + diasASumar);
+    
+    const fecha_vencimiento = `${inicioDate.getFullYear()}-${String(inicioDate.getMonth() + 1).padStart(2, '0')}-${String(inicioDate.getDate()).padStart(2, '0')}`;
+    
+    console.log('✅ ADMIN CLIENTE:', { membresia: membresiaLower, inicio: fecha_inicio, vence: fecha_vencimiento, dias: diasASumar });
 
     try {
         const [result] = await pool.promise().query(
             `INSERT INTO usuarios 
              (nombre, apellido, email, password, telefono, fecha_nacimiento, genero, 
-              membresia, precio_membresia, fecha_vencimiento, estado) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              membresia, precio_membresia, fecha_inicio_membresia, fecha_vencimiento, estado) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [nombre, apellido, email, finalPassword, telefono, fecha_nacimiento, genero, 
-             membresia, precio_membresia, fecha_vencimiento, estado]
+             membresiaLower, precio_membresia, fecha_inicio, fecha_vencimiento, estado]
         );
 
         // Obtener el cliente recién creado
         const [newClient] = await pool.promise().query(
             `SELECT id, nombre, apellido, email, telefono, genero, fecha_nacimiento,
                     membresia, estado, precio_membresia, total_visitas,
+                    DATE_FORMAT(fecha_inicio_membresia, "%d/%m/%Y") as fecha_inicio_membresia,
                     DATE_FORMAT(fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
+                    DATEDIFF(fecha_vencimiento, CURDATE()) as dias_restantes,
                     DATE_FORMAT(created_at, "%d/%m/%Y") as fecha_registro
              FROM usuarios WHERE id = ?`,
             [result.insertId]
@@ -244,8 +310,10 @@ app.get('/usuarios', async (req, res) => {
         SELECT u.id, u.nombre, u.apellido, u.email, u.telefono, u.genero, u.fecha_nacimiento, 
                u.membresia, u.estado, u.precio_membresia, u.total_visitas,
                DATE_FORMAT(u.ultima_visita, "%d/%m/%Y %H:%i") as ultima_visita,
+               DATE_FORMAT(u.fecha_inicio_membresia, "%d/%m/%Y") as fecha_inicio_membresia,
                DATE_FORMAT(u.fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
                DATE_FORMAT(u.created_at, "%d/%m/%Y") as fecha_registro,
+               DATEDIFF(u.fecha_vencimiento, CURDATE()) as dias_restantes,
                CASE WHEN u.fecha_vencimiento < CURDATE() THEN 'vencida' ELSE 'vigente' END as estado_membresia
         FROM usuarios u WHERE 1=1
     `;
@@ -2429,6 +2497,48 @@ app.get('/rutinas/estadisticas', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
+});
+
+// ==================== ENDPOINT DE PRUEBA FECHAS ====================
+app.get('/test/fechas', (req, res) => {
+    const { membresia = 'dia' } = req.query;
+    
+    // Fecha de inicio es HOY
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    
+    // Calcular fecha de vencimiento
+    const fechaVenc = new Date(hoy);
+    switch(membresia) {
+        case 'dia': 
+            fechaVenc.setDate(fechaVenc.getDate() + 1);
+            break;
+        case 'semanal': 
+            fechaVenc.setDate(fechaVenc.getDate() + 7);
+            break;
+        case 'quincenal': 
+            fechaVenc.setDate(fechaVenc.getDate() + 15);
+            break;
+        case 'mensual': 
+            fechaVenc.setDate(fechaVenc.getDate() + 30);
+            break;
+        case 'anual': 
+            fechaVenc.setDate(fechaVenc.getDate() + 365);
+            break;
+    }
+    
+    const fecha_inicio = hoy.toISOString().split('T')[0];
+    const fecha_vencimiento = fechaVenc.toISOString().split('T')[0];
+    
+    res.json({
+        membresia,
+        fecha_inicio_raw: hoy.toISOString(),
+        fecha_inicio,
+        fecha_vencimiento_raw: fechaVenc.toISOString(),
+        fecha_vencimiento,
+        dias_diferencia: Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24)),
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Iniciar servidor
