@@ -64,35 +64,174 @@ app.post('/login', async (req, res) => {
     }
 });
 
-// Registro
+// Registro de usuario (autoregistro público)
 app.post('/register', async (req, res) => {
-    const { nombre, apellido, email, password, telefono, fecha_nacimiento, genero, membresia = 'dia' } = req.body;
+    const { 
+        nombre, apellido, email, password, telefono, 
+        fecha_nacimiento, genero, membresia = 'dia',
+        direccion, contacto_emergencia, contacto_emergencia_telefono,
+        objetivo_fitness, condiciones_medicas, notas
+    } = req.body;
 
+    // Validaciones básicas
     if (!nombre || !email || !password) {
         return res.status(400).json({ success: false, message: 'Nombre, email y password son requeridos' });
     }
 
+    if (!apellido) {
+        return res.status(400).json({ success: false, message: 'El apellido es requerido' });
+    }
+
+    if (!telefono) {
+        return res.status(400).json({ success: false, message: 'El teléfono es requerido' });
+    }
+
+    if (!genero || !['M', 'F', 'Otro'].includes(genero)) {
+        return res.status(400).json({ success: false, message: 'Género inválido (opciones: M, F, Otro)' });
+    }
+
+    // Validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return res.status(400).json({ success: false, message: 'Formato de email inválido' });
+    }
+
+    // Validar longitud de contraseña
+    if (password.length < 6) {
+        return res.status(400).json({ success: false, message: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+
+    // Calcular precio y fecha de vencimiento según membresía
     const precios = { dia: 4000, semanal: 30000, quincenal: 40000, mensual: 60000, anual: 600000 };
     const precio_membresia = precios[membresia] || 4000;
+    
     const fecha_vencimiento = new Date();
-    fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1);
+    switch(membresia) {
+        case 'dia': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 1); break;
+        case 'semanal': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 7); break;
+        case 'quincenal': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 15); break;
+        case 'mensual': fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1); break;
+        case 'anual': fecha_vencimiento.setFullYear(fecha_vencimiento.getFullYear() + 1); break;
+        default: fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1);
+    }
 
     try {
         const [result] = await pool.promise().query(
-            `INSERT INTO usuarios (nombre, apellido, email, password, telefono, fecha_nacimiento, genero, membresia, precio_membresia, fecha_vencimiento, ultima_visita) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-            [nombre, apellido, email, password, telefono, fecha_nacimiento, genero, membresia, precio_membresia, fecha_vencimiento]
+            `INSERT INTO usuarios 
+             (nombre, apellido, email, password, telefono, fecha_nacimiento, genero, 
+              membresia, precio_membresia, fecha_vencimiento, ultima_visita, estado) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'activo')`,
+            [nombre, apellido, email, password, telefono, fecha_nacimiento, genero, 
+             membresia, precio_membresia, fecha_vencimiento]
+        );
+
+        // Obtener el usuario recién creado (sin password)
+        const [newUser] = await pool.promise().query(
+            `SELECT id, nombre, apellido, email, telefono, genero, fecha_nacimiento,
+                    membresia, estado, precio_membresia,
+                    DATE_FORMAT(fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento
+             FROM usuarios WHERE id = ?`,
+            [result.insertId]
         );
 
         res.status(201).json({ 
             success: true, 
             id: result.insertId,
-            message: 'Usuario registrado exitosamente'
+            message: '¡Bienvenido! Usuario registrado exitosamente',
+            user: newUser[0]
         });
     } catch (error) {
         if (error.code === 'ER_DUP_ENTRY') {
             return res.status(409).json({ success: false, message: 'El email ya existe' });
         }
+        console.error('Error en registro:', error);
+        res.status(500).json({ success: false, message: 'Error del servidor' });
+    }
+});
+
+// Crear cliente (solo para administradores - sin password obligatorio)
+app.post('/admin/clientes', async (req, res) => {
+    const { 
+        nombre, apellido, email, password, telefono, 
+        fecha_nacimiento, genero, membresia = 'dia',
+        direccion, contacto_emergencia, contacto_emergencia_telefono,
+        objetivo_fitness, condiciones_medicas, notas, estado = 'activo'
+    } = req.body;
+
+    // Validaciones básicas
+    if (!nombre || !apellido || !email) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Nombre, apellido y email son requeridos' 
+        });
+    }
+
+    if (!telefono) {
+        return res.status(400).json({ success: false, message: 'El teléfono es requerido' });
+    }
+
+    if (!genero || !['M', 'F', 'Otro'].includes(genero)) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Género inválido (opciones: M, F, Otro)' 
+        });
+    }
+
+    // Validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return res.status(400).json({ success: false, message: 'Formato de email inválido' });
+    }
+
+    // Si no se proporciona password, generar uno temporal
+    const finalPassword = password || `Gym${Math.random().toString(36).slice(-8)}`;
+
+    // Calcular precio y fecha de vencimiento
+    const precios = { dia: 4000, semanal: 30000, quincenal: 40000, mensual: 60000, anual: 600000 };
+    const precio_membresia = precios[membresia] || 4000;
+    
+    const fecha_vencimiento = new Date();
+    switch(membresia) {
+        case 'dia': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 1); break;
+        case 'semanal': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 7); break;
+        case 'quincenal': fecha_vencimiento.setDate(fecha_vencimiento.getDate() + 15); break;
+        case 'mensual': fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1); break;
+        case 'anual': fecha_vencimiento.setFullYear(fecha_vencimiento.getFullYear() + 1); break;
+        default: fecha_vencimiento.setMonth(fecha_vencimiento.getMonth() + 1);
+    }
+
+    try {
+        const [result] = await pool.promise().query(
+            `INSERT INTO usuarios 
+             (nombre, apellido, email, password, telefono, fecha_nacimiento, genero, 
+              membresia, precio_membresia, fecha_vencimiento, estado) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [nombre, apellido, email, finalPassword, telefono, fecha_nacimiento, genero, 
+             membresia, precio_membresia, fecha_vencimiento, estado]
+        );
+
+        // Obtener el cliente recién creado
+        const [newClient] = await pool.promise().query(
+            `SELECT id, nombre, apellido, email, telefono, genero, fecha_nacimiento,
+                    membresia, estado, precio_membresia, total_visitas,
+                    DATE_FORMAT(fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
+                    DATE_FORMAT(created_at, "%d/%m/%Y") as fecha_registro
+             FROM usuarios WHERE id = ?`,
+            [result.insertId]
+        );
+
+        res.status(201).json({ 
+            success: true, 
+            id: result.insertId,
+            message: 'Cliente creado exitosamente',
+            cliente: newClient[0],
+            password_temporal: !password ? finalPassword : undefined
+        });
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ success: false, message: 'El email ya existe' });
+        }
+        console.error('Error al crear cliente:', error);
         res.status(500).json({ success: false, message: 'Error del servidor' });
     }
 });
@@ -2298,7 +2437,8 @@ app.listen(port, () => {
     console.log('\n📋 ENDPOINTS DISPONIBLES:');
     console.log('👤 USUARIOS:');
     console.log('  POST /login - Iniciar sesión');
-    console.log('  POST /register - Registrar usuario');
+    console.log('  POST /register - Autoregistro de usuario (público)');
+    console.log('  POST /admin/clientes - Crear cliente (administrador)');
     console.log('  GET /usuarios - Listar usuarios (filtros: ?estado, membresia, vencidas)');
     console.log('  GET /usuarios/:id - Ver usuario individual');
     console.log('  PUT /usuarios/:id - Actualizar usuario');

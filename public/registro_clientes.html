@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Registro de Clientes - Gimnasio</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        overflow: hidden;
+      }
+
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        text-align: center;
+      }
+
+      .header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 10px;
+      }
+
+      .tabs {
+        display: flex;
+        background: #f5f5f5;
+        border-bottom: 2px solid #ddd;
+      }
+
+      .tab {
+        flex: 1;
+        padding: 20px;
+        text-align: center;
+        cursor: pointer;
+        background: #f5f5f5;
+        border: none;
+        font-size: 1.1rem;
+        font-weight: 600;
+        transition: all 0.3s;
+      }
+
+      .tab:hover {
+        background: #e0e0e0;
+      }
+
+      .tab.active {
+        background: white;
+        color: #667eea;
+        border-bottom: 3px solid #667eea;
+      }
+
+      .form-container {
+        padding: 40px;
+        display: none;
+      }
+
+      .form-container.active {
+        display: block;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #333;
+      }
+
+      label.required::after {
+        content: " *";
+        color: #e74c3c;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        font-size: 1rem;
+        transition: border-color 0.3s;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+
+      button[type="submit"] {
+        width: 100%;
+        padding: 15px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s;
+      }
+
+      button[type="submit"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+      }
+
+      .alert {
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 8px;
+        display: none;
+      }
+
+      .alert.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+
+      .alert.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+
+      .alert.show {
+        display: block;
+        animation: slideDown 0.3s ease;
+      }
+
+      @keyframes slideDown {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .info-box {
+        background: #e7f3ff;
+        border-left: 4px solid #2196f3;
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 5px;
+      }
+
+      .password-generated {
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 15px;
+        margin-top: 15px;
+        border-radius: 5px;
+        display: none;
+      }
+
+      .password-generated strong {
+        font-size: 1.2rem;
+        color: #856404;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🏋️ Registro de Clientes</h1>
+        <p>Sistema de Gestión de Gimnasio</p>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('autoregistro')">
+          👤 Autoregistro
+        </button>
+        <button class="tab" onclick="switchTab('admin')">
+          👨‍💼 Admin - Crear Cliente
+        </button>
+      </div>
+
+      <!-- FORMULARIO DE AUTOREGISTRO -->
+      <div id="autoregistro" class="form-container active">
+        <div class="info-box">
+          <strong>ℹ️ Autoregistro Público</strong>
+          <p>Completa este formulario para crear tu cuenta en el gimnasio.</p>
+        </div>
+
+        <div id="alert-autoregistro" class="alert"></div>
+
+        <form id="form-autoregistro" onsubmit="registrarUsuario(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="required">Nombre</label>
+              <input type="text" name="nombre" required />
+            </div>
+            <div class="form-group">
+              <label class="required">Apellido</label>
+              <input type="text" name="apellido" required />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="required">Email</label>
+              <input type="email" name="email" required />
+            </div>
+            <div class="form-group">
+              <label class="required">Teléfono</label>
+              <input
+                type="tel"
+                name="telefono"
+                required
+                placeholder="555-0001"
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="required">Contraseña</label>
+              <input type="password" name="password" required minlength="6" />
+            </div>
+            <div class="form-group">
+              <label class="required">Género</label>
+              <select name="genero" required>
+                <option value="">Seleccionar...</option>
+                <option value="M">Masculino</option>
+                <option value="F">Femenino</option>
+                <option value="Otro">Otro</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Fecha de Nacimiento</label>
+              <input type="date" name="fecha_nacimiento" />
+            </div>
+            <div class="form-group">
+              <label class="required">Membresía</label>
+              <select name="membresia" required>
+                <option value="dia">Día - $4,000</option>
+                <option value="semanal">Semanal - $30,000</option>
+                <option value="quincenal">Quincenal - $40,000</option>
+                <option value="mensual" selected>Mensual - $60,000</option>
+                <option value="anual">Anual - $600,000</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Dirección</label>
+            <input
+              type="text"
+              name="direccion"
+              placeholder="Calle 123 #45-67"
+            />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Contacto de Emergencia</label>
+              <input
+                type="text"
+                name="contacto_emergencia"
+                placeholder="Nombre completo"
+              />
+            </div>
+            <div class="form-group">
+              <label>Teléfono de Emergencia</label>
+              <input
+                type="tel"
+                name="contacto_emergencia_telefono"
+                placeholder="555-0002"
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Objetivo Fitness</label>
+            <input
+              type="text"
+              name="objetivo_fitness"
+              placeholder="Ej: Pérdida de peso, Ganar músculo"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Condiciones Médicas</label>
+            <textarea
+              name="condiciones_medicas"
+              rows="2"
+              placeholder="Cualquier condición médica relevante"
+            ></textarea>
+          </div>
+
+          <button type="submit">🚀 Registrarse</button>
+        </form>
+      </div>
+
+      <!-- FORMULARIO ADMIN -->
+      <div id="admin" class="form-container">
+        <div class="info-box">
+          <strong>🔒 Panel de Administrador</strong>
+          <p>
+            Crea clientes para el gimnasio. La contraseña es opcional (se
+            generará automáticamente).
+          </p>
+        </div>
+
+        <div id="alert-admin" class="alert"></div>
+        <div id="password-generated" class="password-generated"></div>
+
+        <form id="form-admin" onsubmit="crearCliente(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="required">Nombre</label>
+              <input type="text" name="nombre" required />
+            </div>
+            <div class="form-group">
+              <label class="required">Apellido</label>
+              <input type="text" name="apellido" required />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="required">Email</label>
+              <input type="email" name="email" required />
+            </div>
+            <div class="form-group">
+              <label class="required">Teléfono</label>
+              <input
+                type="tel"
+                name="telefono"
+                required
+                placeholder="555-0001"
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Contraseña (opcional)</label>
+              <input
+                type="password"
+                name="password"
+                minlength="6"
+                placeholder="Dejar vacío para autogenerar"
+              />
+            </div>
+            <div class="form-group">
+              <label class="required">Género</label>
+              <select name="genero" required>
+                <option value="">Seleccionar...</option>
+                <option value="M">Masculino</option>
+                <option value="F">Femenino</option>
+                <option value="Otro">Otro</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Fecha de Nacimiento</label>
+              <input type="date" name="fecha_nacimiento" />
+            </div>
+            <div class="form-group">
+              <label class="required">Membresía</label>
+              <select name="membresia" required>
+                <option value="dia">Día - $4,000</option>
+                <option value="semanal">Semanal - $30,000</option>
+                <option value="quincenal">Quincenal - $40,000</option>
+                <option value="mensual" selected>Mensual - $60,000</option>
+                <option value="anual">Anual - $600,000</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Estado</label>
+            <select name="estado">
+              <option value="activo" selected>Activo</option>
+              <option value="inactivo">Inactivo</option>
+              <option value="suspendido">Suspendido</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Dirección</label>
+            <input
+              type="text"
+              name="direccion"
+              placeholder="Calle 123 #45-67"
+            />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Contacto de Emergencia</label>
+              <input
+                type="text"
+                name="contacto_emergencia"
+                placeholder="Nombre completo"
+              />
+            </div>
+            <div class="form-group">
+              <label>Teléfono de Emergencia</label>
+              <input
+                type="tel"
+                name="contacto_emergencia_telefono"
+                placeholder="555-0002"
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Objetivo Fitness</label>
+            <input
+              type="text"
+              name="objetivo_fitness"
+              placeholder="Ej: Tonificación, Cardio"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Condiciones Médicas</label>
+            <textarea
+              name="condiciones_medicas"
+              rows="2"
+              placeholder="Cualquier condición médica relevante"
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Notas Administrativas</label>
+            <textarea
+              name="notas"
+              rows="3"
+              placeholder="Notas internas del gimnasio"
+            ></textarea>
+          </div>
+
+          <button type="submit">✅ Crear Cliente</button>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      const API_URL = "http://localhost:3001";
+
+      function switchTab(tab) {
+        // Cambiar tabs activos
+        document
+          .querySelectorAll(".tab")
+          .forEach((t) => t.classList.remove("active"));
+        document
+          .querySelectorAll(".form-container")
+          .forEach((f) => f.classList.remove("active"));
+
+        event.target.classList.add("active");
+        document.getElementById(tab).classList.add("active");
+
+        // Limpiar alertas
+        document.querySelectorAll(".alert").forEach((a) => {
+          a.classList.remove("show");
+        });
+      }
+
+      function showAlert(containerId, message, type) {
+        const alert = document.getElementById(containerId);
+        alert.textContent = message;
+        alert.className = `alert ${type} show`;
+
+        setTimeout(() => {
+          alert.classList.remove("show");
+        }, 5000);
+      }
+
+      function formToJSON(form) {
+        const formData = new FormData(form);
+        const data = {};
+
+        for (let [key, value] of formData.entries()) {
+          if (value) data[key] = value;
+        }
+
+        return data;
+      }
+
+      async function registrarUsuario(event) {
+        event.preventDefault();
+
+        const form = event.target;
+        const data = formToJSON(form);
+
+        try {
+          const response = await fetch(`${API_URL}/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            showAlert(
+              "alert-autoregistro",
+              `✅ ${result.message} - Usuario ID: ${result.id}`,
+              "success"
+            );
+            form.reset();
+
+            console.log("Usuario registrado:", result.user);
+          } else {
+            showAlert(
+              "alert-autoregistro",
+              `❌ Error: ${result.message}`,
+              "error"
+            );
+          }
+        } catch (error) {
+          showAlert(
+            "alert-autoregistro",
+            `❌ Error de conexión: ${error.message}`,
+            "error"
+          );
+          console.error("Error:", error);
+        }
+      }
+
+      async function crearCliente(event) {
+        event.preventDefault();
+
+        const form = event.target;
+        const data = formToJSON(form);
+
+        try {
+          const response = await fetch(`${API_URL}/admin/clientes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            showAlert(
+              "alert-admin",
+              `✅ ${result.message} - Cliente ID: ${result.id}`,
+              "success"
+            );
+
+            // Mostrar password temporal si fue generado
+            const passwordBox = document.getElementById("password-generated");
+            if (result.password_temporal) {
+              passwordBox.innerHTML = `
+                            <strong>🔑 Contraseña Temporal Generada:</strong><br>
+                            <code style="font-size: 1.3rem; color: #d9534f; font-weight: bold;">
+                                ${result.password_temporal}
+                            </code><br>
+                            <small>⚠️ Guarda esta contraseña y entrégala al cliente.</small>
+                        `;
+              passwordBox.style.display = "block";
+            } else {
+              passwordBox.style.display = "none";
+            }
+
+            form.reset();
+            console.log("Cliente creado:", result.cliente);
+          } else {
+            showAlert("alert-admin", `❌ Error: ${result.message}`, "error");
+          }
+        } catch (error) {
+          showAlert(
+            "alert-admin",
+            `❌ Error de conexión: ${error.message}`,
+            "error"
+          );
+          console.error("Error:", error);
+        }
+      }
+    </script>
+  </body>
+</html>
