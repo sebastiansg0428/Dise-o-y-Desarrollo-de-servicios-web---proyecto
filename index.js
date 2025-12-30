@@ -2541,11 +2541,184 @@ app.get('/test/fechas', (req, res) => {
     });
 });
 
+// ==================== DASHBOARD ====================
+
+// Endpoint especial para el dashboard - devuelve TODOS los datos necesarios en una llamada
+app.get('/dashboard', async (req, res) => {
+    try {
+        // 1. Estadísticas de usuarios (Total Clientes y Asistencia Hoy)
+        const [usuariosStats] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_clientes,
+                SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as clientes_activos,
+                COUNT(CASE WHEN DATE(ultima_visita) = CURDATE() THEN 1 END) as asistencia_hoy,
+                ROUND(AVG(CASE WHEN DATE(ultima_visita) = CURDATE() THEN 1 ELSE 0 END) * 100, 1) as porcentaje_asistencia
+            FROM usuarios
+        `);
+
+        // 2. Ingresos del mes actual
+        const [ingresosStats] = await pool.promise().query(`
+            SELECT 
+                COALESCE(SUM(CASE WHEN estado = 'pagado' AND MONTH(fecha_pago) = MONTH(CURDATE()) AND YEAR(fecha_pago) = YEAR(CURDATE()) THEN monto ELSE 0 END), 0) as ingresos_mes_actual,
+                COALESCE(SUM(CASE WHEN estado = 'pagado' AND MONTH(fecha_pago) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND YEAR(fecha_pago) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) THEN monto ELSE 0 END), 0) as ingresos_mes_anterior
+            FROM pagos
+        `);
+
+        // Calcular porcentaje de cambio en ingresos
+        const ingresosMesActual = parseFloat(ingresosStats[0].ingresos_mes_actual) || 0;
+        const ingresosMesAnterior = parseFloat(ingresosStats[0].ingresos_mes_anterior) || 0;
+        let porcentajeCambioIngresos = 0;
+        
+        if (ingresosMesAnterior > 0) {
+            porcentajeCambioIngresos = Math.round(((ingresosMesActual - ingresosMesAnterior) / ingresosMesAnterior) * 100);
+        } else if (ingresosMesActual > 0) {
+            porcentajeCambioIngresos = 100;
+        }
+
+        // 3. Rutinas activas (usuarios con rutinas asignadas y en progreso)
+        const [rutinasStats] = await pool.promise().query(`
+            SELECT 
+                COUNT(DISTINCT usuario_id) as rutinas_activas,
+                COUNT(*) as total_asignaciones
+            FROM usuarios_rutinas
+            WHERE estado IN ('asignada', 'en_progreso')
+        `);
+
+        // Calcular estadísticas de rutinas esta semana
+        const [rutinasSemanales] = await pool.promise().query(`
+            SELECT COUNT(*) as rutinas_semana
+            FROM usuarios_rutinas
+            WHERE DATE(fecha_asignacion) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+        `);
+
+        // 4. Actividad reciente (últimas acciones) - Simplificada
+        const [actividadReciente] = await pool.promise().query(`
+            (SELECT 
+                'completado_rutina' as tipo,
+                CONCAT(u.nombre, ' ', u.apellido, ' completó su rutina') as descripcion,
+                ur.updated_at as fecha,
+                u.id as usuario_id
+            FROM usuarios_rutinas ur
+            INNER JOIN usuarios u ON ur.usuario_id = u.id
+            WHERE ur.progreso = 100 AND ur.updated_at IS NOT NULL
+            ORDER BY ur.updated_at DESC
+            LIMIT 3)
+            
+            UNION ALL
+            
+            (SELECT 
+                'nueva_inscripcion' as tipo,
+                CONCAT('Nueva inscripción: ', nombre, ' ', apellido) as descripcion,
+                created_at as fecha,
+                id as usuario_id
+            FROM usuarios
+            WHERE DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            ORDER BY created_at DESC
+            LIMIT 3)
+            
+            UNION ALL
+            
+            (SELECT 
+                'pago_recibido' as tipo,
+                CONCAT('Pago recibido de ', u.nombre, ' ', u.apellido) as descripcion,
+                p.fecha_pago as fecha,
+                p.usuario_id
+            FROM pagos p
+            INNER JOIN usuarios u ON p.usuario_id = u.id
+            WHERE p.estado = 'pagado' AND DATE(p.fecha_pago) >= DATE_SUB(CURDATE(), INTERVAL 3 DAY)
+            ORDER BY p.fecha_pago DESC
+            LIMIT 3)
+            
+            ORDER BY fecha DESC
+            LIMIT 10
+        `);
+
+        // Formatear la actividad reciente
+        const actividadFormateada = actividadReciente.map(act => {
+            const ahora = new Date();
+            const fechaAct = new Date(act.fecha);
+            const diffMs = ahora - fechaAct;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHoras = Math.floor(diffMs / 3600000);
+            const diffDias = Math.floor(diffMs / 86400000);
+            
+            let tiempoTranscurrido;
+            if (diffMins < 60) {
+                tiempoTranscurrido = `Hace ${diffMins} min`;
+            } else if (diffHoras < 24) {
+                tiempoTranscurrido = `Hace ${diffHoras} hora${diffHoras > 1 ? 's' : ''}`;
+            } else {
+                tiempoTranscurrido = `Hace ${diffDias} día${diffDias > 1 ? 's' : ''}`;
+            }
+            
+            return {
+                tipo: act.tipo,
+                descripcion: act.descripcion,
+                tiempo: tiempoTranscurrido,
+                fecha: act.fecha
+            };
+        });
+
+        // Respuesta consolidada del dashboard con múltiples formatos para compatibilidad
+        const totalClientes = parseInt(usuariosStats[0]?.total_clientes) || 0;
+        const clientesActivos = parseInt(usuariosStats[0]?.clientes_activos) || 0;
+        const asistenciaHoy = parseInt(usuariosStats[0]?.asistencia_hoy) || 0;
+        const rutinasActivas = parseInt(rutinasStats[0]?.rutinas_activas) || 0;
+        
+        res.json({
+            // Formato completo
+            usuarios: {
+                total: totalClientes,  // Alias para compatibilidad
+                total_clientes: totalClientes,
+                clientes_activos: clientesActivos,
+                activos: clientesActivos,  // Alias
+                asistencia_hoy: asistenciaHoy,
+                asistencia: asistenciaHoy,  // Alias
+                porcentaje_asistencia: parseFloat(usuariosStats[0]?.porcentaje_asistencia) || 0
+            },
+            ingresos: {
+                total: ingresosMesActual,  // Alias
+                mes_actual: ingresosMesActual,
+                mes_anterior: ingresosMesAnterior,
+                cambio_porcentaje: porcentajeCambioIngresos,
+                cambio: porcentajeCambioIngresos,  // Alias
+                texto_cambio: porcentajeCambioIngresos >= 0 
+                    ? `+${porcentajeCambioIngresos}% frente a mes anterior` 
+                    : `${porcentajeCambioIngresos}% frente a mes anterior`
+            },
+            rutinas: {
+                total: rutinasActivas,  // Alias
+                activas: rutinasActivas,
+                total_asignaciones: parseInt(rutinasStats[0]?.total_asignaciones) || 0,
+                nuevas_esta_semana: parseInt(rutinasSemanales[0]?.rutinas_semana) || 0
+            },
+            actividad_reciente: actividadFormateada || [],
+            // Formato simplificado para acceso rápido
+            stats: {
+                totalClientes: totalClientes,
+                clientesActivos: clientesActivos,
+                asistenciaHoy: asistenciaHoy,
+                ingresosMes: ingresosMesActual,
+                rutinasActivas: rutinasActivas
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error en dashboard:', error);
+        res.status(500).json({ 
+            error: error.message,
+            detalles: 'Error al obtener datos del dashboard'
+        });
+    }
+});
+
 // Iniciar servidor
 app.listen(port, () => {
     console.log(`🏋️ Sistema de Gimnasio corriendo en http://localhost:${port}`);
     console.log('\n📋 ENDPOINTS DISPONIBLES:');
-    console.log('👤 USUARIOS:');
+    console.log('🏠 DASHBOARD:');
+    console.log('  GET /dashboard - Datos completos del dashboard (clientes, ingresos, rutinas, actividad reciente)');
+    console.log('\n👤 USUARIOS:');
     console.log('  POST /login - Iniciar sesión');
     console.log('  POST /register - Autoregistro de usuario (público)');
     console.log('  POST /admin/clientes - Crear cliente (administrador) con filtros: ?nombre, apellido, email, telefono, genero, fecha_nacimiento, especialidad_principal, experiencia_anios, certificaciones, biografia, tarifa_rutina');
