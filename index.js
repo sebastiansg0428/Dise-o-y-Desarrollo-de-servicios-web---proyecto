@@ -369,7 +369,7 @@ app.get('/usuarios/:id', async (req, res) => {
 // Actualizar usuario
 app.put('/usuarios/:id', async (req, res) => {
     const { id } = req.params;
-    const { nombre, apellido, email, telefono, fecha_nacimiento, genero, membresia } = req.body;
+    const { nombre, apellido, email, telefono, fecha_nacimiento, genero, membresia, estado } = req.body;
     
     const updates = [];
     const values = [];
@@ -380,6 +380,7 @@ app.put('/usuarios/:id', async (req, res) => {
     if (telefono) { updates.push('telefono = ?'); values.push(telefono); }
     if (fecha_nacimiento) { updates.push('fecha_nacimiento = ?'); values.push(fecha_nacimiento); }
     if (genero) { updates.push('genero = ?'); values.push(genero); }
+    if (estado) { updates.push('estado = ?'); values.push(estado); }
     if (membresia) { 
         updates.push('membresia = ?'); 
         updates.push('precio_membresia = ?'); 
