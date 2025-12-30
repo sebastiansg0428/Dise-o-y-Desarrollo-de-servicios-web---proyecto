@@ -2548,7 +2548,7 @@ app.listen(port, () => {
     console.log('👤 USUARIOS:');
     console.log('  POST /login - Iniciar sesión');
     console.log('  POST /register - Autoregistro de usuario (público)');
-    console.log('  POST /admin/clientes - Crear cliente (administrador)');
+    console.log('  POST /admin/clientes - Crear cliente (administrador) con filtros: ?nombre, apellido, email, telefono, genero, fecha_nacimiento, especialidad_principal, experiencia_anios, certificaciones, biografia, tarifa_rutina');
     console.log('  GET /usuarios - Listar usuarios (filtros: ?estado, membresia, vencidas)');
     console.log('  GET /usuarios/:id - Ver usuario individual');
     console.log('  PUT /usuarios/:id - Actualizar usuario');
@@ -2559,7 +2559,7 @@ app.listen(port, () => {
     console.log('\n🛒 PRODUCTOS:');
     console.log('  GET /productos - Listar productos (filtros: ?categoria, estado, stock_bajo)');
     console.log('  GET /productos/:id - Ver producto individual');
-    console.log('  POST /productos - Crear producto');
+    console.log('  POST /productos - Crear producto (filtros: ?categoria, estado, stock_bajo)');
     console.log('  PUT /productos/:id - Actualizar producto');
     console.log('  DELETE /productos/:id - Eliminar producto');
     console.log('  POST /productos/:id/vender - Vender producto');
@@ -2587,11 +2587,11 @@ app.listen(port, () => {
     console.log('\n🏋️ ENTRENADORES:');
     console.log('  GET /entrenadores - Listar entrenadores (filtros: ?especialidad=fuerza&estado=activo)');
     console.log('  GET /entrenadores/:id - Ver entrenador con horarios');
-    console.log('  POST /entrenadores - Crear entrenador');
+    console.log('  POST /entrenadores - Crear entrenador (filtros: ?nombre, apellido, especialidad, estado)');
     console.log('  PUT /entrenadores/:id - Actualizar entrenador');
     console.log('  DELETE /entrenadores/:id - Eliminar entrenador');
     console.log('  GET /entrenadores/:id/horarios - Listar horarios');
-    console.log('  POST /entrenadores/:id/horarios - Crear horario');
+    console.log('  POST /entrenadores/:id/horarios - Crear horario (filtros: ?dia_semana, hora_inicio, hora_fin, disponible)');
     console.log('  DELETE /entrenadores/:id/horarios/:horario_id - Eliminar horario');
     console.log('  POST /entrenadores/:entrenador_id/clientes/:usuario_id - Asignar cliente');
     console.log('  GET /entrenadores/:entrenador_id/clientes - Ver clientes del entrenador');
@@ -2611,7 +2611,7 @@ app.listen(port, () => {
     console.log('\n🏷️ PAGOS:');
     console.log('  GET /pagos - Listar pagos (filtros: ?usuario_id, tipo_pago, estado, fecha_desde, fecha_hasta)');
     console.log('  GET /pagos/:id - Ver pago individual');
-    console.log('  POST /pagos - Crear pago');
+    console.log('  POST /pagos - Crear pago (filtros: ?usuario_id, tipo_pago, monto, estado, fecha)');
     console.log('  PUT /pagos/:id - Actualizar pago');
     console.log('  DELETE /pagos/:id - Cancelar pago');
     console.log('  POST /pagos/renovar-membresia - Renovar membresía con pago');
