@@ -156,6 +156,15 @@ app.post('/register', async (req, res) => {
              membresiaLower, precio_membresia, fecha_inicio, fecha_vencimiento]
         );
 
+        const usuario_id = result.insertId;
+
+        // Crear el pago automáticamente con estado "pagado"
+        await pool.promise().query(
+            `INSERT INTO pagos (usuario_id, tipo_pago, concepto, monto, metodo_pago, estado, fecha_pago)
+             VALUES (?, 'membresia', ?, ?, 'efectivo', 'pagado', NOW())`,
+            [usuario_id, `Membresía ${membresiaLower}`, precio_membresia]
+        );
+
         // Obtener el usuario recién creado (sin password)
         const [newUser] = await pool.promise().query(
             `SELECT id, nombre, apellido, email, telefono, genero, fecha_nacimiento,
@@ -164,12 +173,12 @@ app.post('/register', async (req, res) => {
                     DATE_FORMAT(fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
                     DATEDIFF(fecha_vencimiento, CURDATE()) as dias_restantes
              FROM usuarios WHERE id = ?`,
-            [result.insertId]
+            [usuario_id]
         );
 
         res.status(201).json({ 
             success: true, 
-            id: result.insertId,
+            id: usuario_id,
             message: '¡Bienvenido! Usuario registrado exitosamente',
             user: newUser[0]
         });
@@ -274,6 +283,15 @@ app.post('/admin/clientes', async (req, res) => {
              membresiaLower, precio_membresia, fecha_inicio, fecha_vencimiento, estado]
         );
 
+        const usuario_id = result.insertId;
+
+        // Crear el pago automáticamente con estado "pagado"
+        await pool.promise().query(
+            `INSERT INTO pagos (usuario_id, tipo_pago, concepto, monto, metodo_pago, estado, fecha_pago)
+             VALUES (?, 'membresia', ?, ?, 'efectivo', 'pagado', NOW())`,
+            [usuario_id, `Membresía ${membresiaLower}`, precio_membresia]
+        );
+
         // Obtener el cliente recién creado
         const [newClient] = await pool.promise().query(
             `SELECT id, nombre, apellido, email, telefono, genero, fecha_nacimiento,
@@ -283,12 +301,12 @@ app.post('/admin/clientes', async (req, res) => {
                     DATEDIFF(fecha_vencimiento, CURDATE()) as dias_restantes,
                     DATE_FORMAT(created_at, "%d/%m/%Y") as fecha_registro
              FROM usuarios WHERE id = ?`,
-            [result.insertId]
+            [usuario_id]
         );
 
         res.status(201).json({ 
             success: true, 
-            id: result.insertId,
+            id: usuario_id,
             message: 'Cliente creado exitosamente',
             cliente: newClient[0],
             password_temporal: !password ? finalPassword : undefined
@@ -1591,7 +1609,7 @@ app.get('/pagos/:id', async (req, res) => {
 
 // Crear pago
 app.post('/pagos', async (req, res) => {
-    const { usuario_id, tipo_pago, concepto, monto, metodo_pago, fecha_vencimiento, comprobante, notas } = req.body;
+    const { usuario_id, tipo_pago, concepto, monto, metodo_pago, fecha_vencimiento, comprobante, notas, estado } = req.body;
     
     if (!usuario_id || !monto || !concepto) {
         return res.status(400).json({ success: false, message: 'usuario_id, monto y concepto son requeridos' });
@@ -1602,16 +1620,25 @@ app.post('/pagos', async (req, res) => {
     }
     
     try {
+        const estadoFinal = estado || 'pendiente';
+        
         const [result] = await pool.promise().query(
             `INSERT INTO pagos (usuario_id, tipo_pago, concepto, monto, metodo_pago, fecha_vencimiento, comprobante, notas, estado)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')`,
-            [usuario_id, tipo_pago || 'membresia', concepto, monto, metodo_pago || 'efectivo', fecha_vencimiento, comprobante, notas]
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [usuario_id, tipo_pago || 'membresia', concepto, monto, metodo_pago || 'efectivo', fecha_vencimiento, comprobante, notas, estadoFinal]
+        );
+        
+        // Obtener el pago recién creado para devolverlo completo
+        const [pagoCreado] = await pool.promise().query(
+            'SELECT * FROM pagos WHERE id = ?',
+            [result.insertId]
         );
         
         res.status(201).json({
             success: true,
             id: result.insertId,
-            message: 'Pago registrado exitosamente'
+            message: 'Pago registrado exitosamente',
+            pago: pagoCreado[0]
         });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Error al registrar pago', error: error.message });
