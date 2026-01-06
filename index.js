@@ -1529,7 +1529,7 @@ app.get('/pagos', async (req, res) => {
     
     let query = `
         SELECT p.id, p.usuario_id, p.tipo_pago, p.concepto, p.monto, p.metodo_pago, 
-               p.estado, p.fecha_vencimiento, p.comprobante,
+               p.estado, p.comprobante,
                DATE_FORMAT(p.fecha_pago, "%d/%m/%Y %H:%i") as fecha_pago,
                DATE_FORMAT(p.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
                u.nombre as usuario_nombre, u.apellido as usuario_apellido, u.email as usuario_email
@@ -1609,7 +1609,7 @@ app.get('/pagos/:id', async (req, res) => {
 
 // Crear pago
 app.post('/pagos', async (req, res) => {
-    const { usuario_id, tipo_pago, concepto, monto, metodo_pago, fecha_vencimiento, comprobante, notas, estado } = req.body;
+    const { usuario_id, tipo_pago, concepto, monto, metodo_pago, comprobante, notas, estado } = req.body;
     
     if (!usuario_id || !monto || !concepto) {
         return res.status(400).json({ success: false, message: 'usuario_id, monto y concepto son requeridos' });
@@ -1620,27 +1620,46 @@ app.post('/pagos', async (req, res) => {
     }
     
     try {
-        const estadoFinal = estado || 'pendiente';
+        // Si no se especifica estado o está vacío, por defecto es PAGADO
+        // Solo será PENDIENTE si explícitamente se envía estado="pendiente"
+        const estadoFinal = (estado && estado.toString().trim().toLowerCase() === 'pendiente') ? 'pendiente' : 'pagado';
         
+        console.log('📝 Creando pago:', { 
+            estado_recibido: estado, 
+            estado_final: estadoFinal,
+            tipo_estado: typeof estado
+        });
+        
+        // SIEMPRE guardar fecha_pago (fecha de registro del pago)
         const [result] = await pool.promise().query(
-            `INSERT INTO pagos (usuario_id, tipo_pago, concepto, monto, metodo_pago, fecha_vencimiento, comprobante, notas, estado)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [usuario_id, tipo_pago || 'membresia', concepto, monto, metodo_pago || 'efectivo', fecha_vencimiento, comprobante, notas, estadoFinal]
+            `INSERT INTO pagos (usuario_id, tipo_pago, concepto, monto, metodo_pago, comprobante, notas, estado, fecha_pago)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [usuario_id, tipo_pago || 'membresia', concepto, monto, metodo_pago || 'efectivo', comprobante || null, notas || null, estadoFinal]
         );
         
         // Obtener el pago recién creado para devolverlo completo
         const [pagoCreado] = await pool.promise().query(
-            'SELECT * FROM pagos WHERE id = ?',
+            'SELECT *, DATE_FORMAT(fecha_pago, "%Y-%m-%d %H:%i:%s") as fecha_pago_formatted FROM pagos WHERE id = ?',
             [result.insertId]
         );
+        
+        console.log('✅ Pago creado:', {
+            id: result.insertId,
+            estado: estadoFinal,
+            fecha_pago: pagoCreado[0].fecha_pago,
+            monto: monto,
+            tipo: estadoFinal === 'pagado' ? 'Pago inmediato' : 'Pago a cuotas/pendiente'
+        });
         
         res.status(201).json({
             success: true,
             id: result.insertId,
-            message: 'Pago registrado exitosamente',
+            message: estadoFinal === 'pagado' ? 'Pago registrado exitosamente' : 'Pago pendiente registrado (a cuotas)',
+            estado: estadoFinal,
             pago: pagoCreado[0]
         });
     } catch (error) {
+        console.error('❌ Error al crear pago:', error);
         res.status(500).json({ success: false, message: 'Error al registrar pago', error: error.message });
     }
 });
