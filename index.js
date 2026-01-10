@@ -7,7 +7,7 @@ const port = 3001;
 
 // Middlewares - CORS mejorado para React
 app.use(cors({
-    origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
+    origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'http://127.0.0.1:5173'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
@@ -102,16 +102,12 @@ app.post('/register', async (req, res) => {
     }
 
     // Calcular precio y fecha de vencimiento según membresía
-    // Opciones disponibles: Dia, Semanal, Quincenal, Mensual, Anual
+    // Opciones disponibles: diaria, semanal, quincenal, mensual, anual (COINCIDEN CON FRONTEND)
     const precios = { 
-        dia: 4000, 
-        diaria: 4000, 
-        semanal: 30000, 
-        semana: 30000,
-        quincenal: 40000, 
-        quincena: 40000,
-        mensual: 60000, 
-        mensualidad: 60000,
+        diaria: 4000,
+        semanal: 30000,
+        quincenal: 40000,
+        mensual: 60000,
         anual: 600000 
     };
     const membresiaLower = membresia.toLowerCase().trim(); // Convertir a minúsculas y quitar espacios
@@ -126,22 +122,18 @@ app.post('/register', async (req, res) => {
     // Fecha de inicio es HOY
     const fecha_inicio = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     
-    // Calcular días a sumar (normalizar nombres)
+    // Calcular días a sumar
     let diasASumar = 0;
     switch(membresiaLower) {
         case 'dia':
-        case 'diaria':
             diasASumar = 1; 
             break;
-        case 'semanal':
         case 'semana': 
             diasASumar = 7; 
             break;
-        case 'quincenal':
         case 'quincena': 
             diasASumar = 15; 
             break;
-        case 'mensual':
         case 'mensualidad': 
             diasASumar = 30; 
             break;
@@ -149,7 +141,7 @@ app.post('/register', async (req, res) => {
             diasASumar = 365; 
             break;
         default: 
-            diasASumar = 30;
+            diasASumar = 1;
     }
     
     // Crear fecha de vencimiento sumando días
@@ -243,16 +235,12 @@ app.post('/admin/clientes', async (req, res) => {
     const finalPassword = password || `Gym${Math.random().toString(36).slice(-8)}`;
 
     // Calcular precio y fecha de vencimiento
-    // Opciones disponibles: Dia, Semanal, Quincenal, Mensual, Anual
+    // Opciones disponibles: diaria, semanal, quincenal, mensual, anual
     const precios = { 
-        dia: 4000, 
-        diaria: 4000, 
-        semanal: 30000, 
-        semana: 30000,
-        quincenal: 40000, 
-        quincena: 40000,
-        mensual: 60000, 
-        mensualidad: 60000,
+        diaria: 4000,
+        semanal: 30000,
+        quincenal: 40000,
+        mensual: 60000,
         anual: 600000 
     };
     const membresiaLower = membresia.toLowerCase().trim(); // Convertir a minúsculas y quitar espacios
@@ -267,30 +255,26 @@ app.post('/admin/clientes', async (req, res) => {
     // Fecha de inicio es HOY
     const fecha_inicio = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     
-    // Calcular días a sumar (normalizar nombres)
+    // Calcular días a sumar
     let diasASumar = 0;
     switch(membresiaLower) {
-        case 'dia':
         case 'diaria':
             diasASumar = 1; 
             break;
-        case 'semanal':
-        case 'semana': 
+        case 'semanal': 
             diasASumar = 7; 
             break;
-        case 'quincenal':
-        case 'quincena': 
+        case 'quincenal': 
             diasASumar = 15; 
             break;
-        case 'mensual':
-        case 'mensualidad': 
+        case 'mensual': 
             diasASumar = 30; 
             break;
         case 'anual': 
             diasASumar = 365; 
             break;
         default: 
-            diasASumar = 30;
+            diasASumar = 1;
     }
     
     // Crear fecha de vencimiento sumando días
@@ -390,6 +374,42 @@ app.get('/usuarios', async (req, res) => {
     }
 });
 
+// Estadísticas de usuarios (DEBE IR ANTES de /usuarios/:id)
+app.get('/usuarios/estadisticas', async (req, res) => {
+    try {
+        const [stats] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_usuarios,
+                SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as usuarios_activos,
+                SUM(CASE WHEN estado = 'inactivo' THEN 1 ELSE 0 END) as usuarios_inactivos,
+                SUM(CASE WHEN estado = 'suspendido' THEN 1 ELSE 0 END) as usuarios_suspendidos,
+                SUM(CASE WHEN membresia = 'diaria' THEN 1 ELSE 0 END) as membresia_diaria,
+                SUM(CASE WHEN membresia = 'semanal' THEN 1 ELSE 0 END) as membresia_semanal,
+                SUM(CASE WHEN membresia = 'quincenal' THEN 1 ELSE 0 END) as membresia_quincenal,
+                SUM(CASE WHEN membresia = 'mensual' THEN 1 ELSE 0 END) as membresia_mensual,
+                SUM(CASE WHEN membresia = 'anual' THEN 1 ELSE 0 END) as membresia_anual,
+                SUM(CASE WHEN fecha_vencimiento < CURDATE() THEN 1 ELSE 0 END) as membresias_vencidas,
+                COUNT(CASE WHEN DATE(ultima_visita) = CURDATE() THEN 1 END) as visitas_hoy,
+                SUM(precio_membresia) as ingresos_mensuales_potenciales,
+                AVG(total_visitas) as promedio_visitas_usuario
+            FROM usuarios
+        `);
+        
+        const [visitasSemanales] = await pool.promise().query(`
+            SELECT COUNT(*) as visitas_semana
+            FROM usuarios 
+            WHERE ultima_visita >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        `);
+        
+        res.json({
+            ...stats[0],
+            visitas_semana: visitasSemanales[0].visitas_semana
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Ver usuario individual
 app.get('/usuarios/:id', async (req, res) => {
     const { id } = req.params;
@@ -415,7 +435,7 @@ app.get('/usuarios/:id', async (req, res) => {
 // Actualizar usuario
 app.put('/usuarios/:id', async (req, res) => {
     const { id } = req.params;
-    const { nombre, apellido, email, telefono, fecha_nacimiento, genero, membresia, estado } = req.body;
+    const { nombre, apellido, email, telefono, fecha_nacimiento, genero, membresia, estado, renovar_membresia, precio_renovacion, metodo_pago } = req.body;
     
     const updates = [];
     const values = [];
@@ -424,50 +444,81 @@ app.put('/usuarios/:id', async (req, res) => {
     if (apellido) { updates.push('apellido = ?'); values.push(apellido); }
     if (email) { updates.push('email = ?'); values.push(email); }
     if (telefono) { updates.push('telefono = ?'); values.push(telefono); }
-    if (fecha_nacimiento) { updates.push('fecha_nacimiento = ?'); values.push(fecha_nacimiento); }
+    if (fecha_nacimiento) { 
+        // Convertir fecha ISO a formato MySQL (YYYY-MM-DD)
+        const fecha = new Date(fecha_nacimiento);
+        const fechaMySQL = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+        updates.push('fecha_nacimiento = ?'); 
+        values.push(fechaMySQL); 
+    }
     if (genero) { updates.push('genero = ?'); values.push(genero); }
     if (estado) { updates.push('estado = ?'); values.push(estado); }
+    
+    // Si se está renovando membresía o cambiando membresía
     if (membresia) { 
-        updates.push('membresia = ?'); 
-        updates.push('precio_membresia = ?'); 
-        values.push(membresia);
+        const membresiaLower = membresia.toLowerCase().trim();
         const precios = { 
-            dia: 4000, 
-            diaria: 4000, 
-            semanal: 30000, 
-            semana: 30000,
-            quincenal: 40000, 
-            quincena: 40000,
-            mensual: 60000, 
-            mensualidad: 60000,
+            diaria: 4000,
+            semanal: 30000,
+            quincenal: 40000,
+            mensual: 60000,
             anual: 600000 
         };
-        const membresiaLower = membresia.toLowerCase().trim();
+        const diasMembresia = {
+            diaria: 1,
+            semanal: 7,
+            quincenal: 15,
+            mensual: 30,
+            anual: 365
+        };
+        
+        updates.push('membresia = ?'); 
+        updates.push('precio_membresia = ?');
+        updates.push('fecha_inicio_membresia = CURDATE()');
+        updates.push('fecha_vencimiento = DATE_ADD(CURDATE(), INTERVAL ? DAY)');
+        
+        values.push(membresiaLower);
         values.push(precios[membresiaLower] || 4000);
+        values.push(diasMembresia[membresiaLower] || 1);
     }
     
-    if (updates.length === 0) {
+    if (updates.length === 0 && !renovar_membresia) {
         return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
     }
     
     values.push(id);
 
     try {
-        const [result] = await pool.promise().query(
-            `UPDATE usuarios SET ${updates.join(', ')}, updated_at = NOW() WHERE id = ?`, 
-            values
-        );
+        // Actualizar usuario si hay campos
+        if (updates.length > 0) {
+            const [result] = await pool.promise().query(
+                `UPDATE usuarios SET ${updates.join(', ')}, updated_at = NOW() WHERE id = ?`, 
+                values
+            );
+            
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+            }
+        }
         
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+        // Si se está renovando membresía, crear un pago
+        if (renovar_membresia && membresia && precio_renovacion) {
+            const membresiaLower = membresia.toLowerCase().trim();
+            await pool.promise().query(
+                `INSERT INTO pagos (usuario_id, tipo_pago, concepto, monto, metodo_pago, estado, fecha_pago)
+                 VALUES (?, 'membresia', ?, ?, ?, 'pagado', NOW())`,
+                [id, `Renovación Membresía ${membresiaLower}`, precio_renovacion, metodo_pago || 'efectivo']
+            );
+            console.log(`✅ Pago de renovación creado para usuario ${id}: $${precio_renovacion}`);
         }
         
         res.json({ success: true, message: 'Usuario actualizado correctamente' });
     } catch (error) {
+        console.error('❌ Error al actualizar usuario:', error);
         if (error.code === 'ER_DUP_ENTRY') {
             return res.status(409).json({ success: false, message: 'Email ya existe' });
         }
-        res.status(500).json({ success: false, message: 'Error al actualizar usuario' });
+        res.status(500).json({ success: false, message: 'Error al actualizar usuario', error: error.message });
     }
 });
 
@@ -543,42 +594,6 @@ app.post('/usuarios/:id/visita', async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Error al registrar visita' });
-    }
-});
-
-// Estadísticas
-app.get('/usuarios/estadisticas', async (req, res) => {
-    try {
-        const [stats] = await pool.promise().query(`
-            SELECT 
-                COUNT(*) as total_usuarios,
-                SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as usuarios_activos,
-                SUM(CASE WHEN estado = 'inactivo' THEN 1 ELSE 0 END) as usuarios_inactivos,
-                SUM(CASE WHEN estado = 'suspendido' THEN 1 ELSE 0 END) as usuarios_suspendidos,
-                SUM(CASE WHEN membresia = 'dia' THEN 1 ELSE 0 END) as membresia_dia,
-                SUM(CASE WHEN membresia = 'semanal' THEN 1 ELSE 0 END) as membresia_semanal,
-                SUM(CASE WHEN membresia = 'quincenal' THEN 1 ELSE 0 END) as membresia_quincenal,
-                SUM(CASE WHEN membresia = 'mensual' THEN 1 ELSE 0 END) as membresia_mensual,
-                SUM(CASE WHEN membresia = 'anual' THEN 1 ELSE 0 END) as membresia_anual,
-                SUM(CASE WHEN fecha_vencimiento < CURDATE() THEN 1 ELSE 0 END) as membresias_vencidas,
-                COUNT(CASE WHEN DATE(ultima_visita) = CURDATE() THEN 1 END) as visitas_hoy,
-                SUM(precio_membresia) as ingresos_mensuales_potenciales,
-                AVG(total_visitas) as promedio_visitas_usuario
-            FROM usuarios
-        `);
-        
-        const [visitasSemanales] = await pool.promise().query(`
-            SELECT COUNT(*) as visitas_semana
-            FROM usuarios 
-            WHERE ultima_visita >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        `);
-        
-        res.json({
-            ...stats[0],
-            visitas_semana: visitasSemanales[0].visitas_semana
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
     }
 });
 
@@ -1720,7 +1735,7 @@ app.get('/pagos/:id', async (req, res) => {
 
 // Crear pago
 app.post('/pagos', async (req, res) => {
-    const { usuario_id, tipo_pago, concepto, monto, metodo_pago, comprobante, notas, estado } = req.body;
+    const { usuario_id, tipo_pago, concepto, monto, metodo_pago, comprobante, notas, estado, tipo_membresia } = req.body;
     
     if (!usuario_id || !monto || !concepto) {
         return res.status(400).json({ success: false, message: 'usuario_id, monto y concepto son requeridos' });
@@ -1738,7 +1753,9 @@ app.post('/pagos', async (req, res) => {
         console.log('📝 Creando pago:', { 
             estado_recibido: estado, 
             estado_final: estadoFinal,
-            tipo_estado: typeof estado
+            tipo_estado: typeof estado,
+            tipo_pago: tipo_pago,
+            tipo_membresia: tipo_membresia
         });
         
         // SIEMPRE guardar fecha_pago (fecha de registro del pago)
@@ -1747,6 +1764,40 @@ app.post('/pagos', async (req, res) => {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
             [usuario_id, tipo_pago || 'membresia', concepto, monto, metodo_pago || 'efectivo', comprobante || null, notas || null, estadoFinal]
         );
+        
+        // Si es un pago de membresía Y está pagado, actualizar el usuario
+        if ((tipo_pago === 'membresia' || concepto.toLowerCase().includes('membresía') || concepto.toLowerCase().includes('membresia')) && estadoFinal === 'pagado' && tipo_membresia) {
+            const membresiaLower = tipo_membresia.toLowerCase().trim();
+            const diasMembresia = {
+                diaria: 1,
+                semanal: 7,
+                quincenal: 15,
+                mensual: 30,
+                anual: 365
+            };
+            const precios = {
+                diaria: 4000,
+                semanal: 30000,
+                quincenal: 40000,
+                mensual: 60000,
+                anual: 600000
+            };
+            
+            if (diasMembresia[membresiaLower]) {
+                await pool.promise().query(
+                    `UPDATE usuarios 
+                     SET membresia = ?,
+                         precio_membresia = ?,
+                         fecha_inicio_membresia = CURDATE(),
+                         fecha_vencimiento = DATE_ADD(CURDATE(), INTERVAL ? DAY),
+                         estado = 'activo',
+                         updated_at = NOW()
+                     WHERE id = ?`,
+                    [membresiaLower, precios[membresiaLower], diasMembresia[membresiaLower], usuario_id]
+                );
+                console.log(`✅ Membresía actualizada: ${membresiaLower} (${diasMembresia[membresiaLower]} días)`);
+            }
+        }
         
         // Obtener el pago recién creado para devolverlo completo
         const [pagoCreado] = await pool.promise().query(
@@ -1778,9 +1829,19 @@ app.post('/pagos', async (req, res) => {
 // Marcar pago como pagado
 app.put('/pagos/:id/pagar', async (req, res) => {
     const { id } = req.params;
-    const { metodo_pago, comprobante, fecha_pago } = req.body;
+    const { metodo_pago, comprobante, fecha_pago, tipo_membresia } = req.body;
     
     try {
+        // Primero obtener el pago para saber si es de membresía
+        const [pago] = await pool.promise().query(
+            'SELECT * FROM pagos WHERE id = ?',
+            [id]
+        );
+        
+        if (pago.length === 0) {
+            return res.status(404).json({ success: false, message: 'Pago no encontrado' });
+        }
+        
         const updates = ['estado = ?'];
         const values = ['pagado'];
         
@@ -1810,6 +1871,41 @@ app.put('/pagos/:id/pagar', async (req, res) => {
         
         if (result.affectedRows === 0) {
             return res.status(404).json({ success: false, message: 'Pago no encontrado' });
+        }
+        
+        // Si es pago de membresía, actualizar fecha de vencimiento del usuario
+        const pagoData = pago[0];
+        if ((pagoData.tipo_pago === 'membresia' || pagoData.concepto.toLowerCase().includes('membresía') || pagoData.concepto.toLowerCase().includes('membresia')) && tipo_membresia) {
+            const membresiaLower = tipo_membresia.toLowerCase().trim();
+            const diasMembresia = {
+                diaria: 1,
+                semanal: 7,
+                quincenal: 15,
+                mensual: 30,
+                anual: 365
+            };
+            const precios = {
+                diaria: 4000,
+                semanal: 30000,
+                quincenal: 40000,
+                mensual: 60000,
+                anual: 600000
+            };
+            
+            if (diasMembresia[membresiaLower]) {
+                await pool.promise().query(
+                    `UPDATE usuarios 
+                     SET membresia = ?,
+                         precio_membresia = ?,
+                         fecha_inicio_membresia = CURDATE(),
+                         fecha_vencimiento = DATE_ADD(CURDATE(), INTERVAL ? DAY),
+                         estado = 'activo',
+                         updated_at = NOW()
+                     WHERE id = ?`,
+                    [membresiaLower, precios[membresiaLower], diasMembresia[membresiaLower], pagoData.usuario_id]
+                );
+                console.log(`✅ Membresía actualizada al marcar pago como pagado: ${membresiaLower}`);
+            }
         }
         
         res.json({ success: true, message: 'Pago marcado como pagado' });
@@ -1866,12 +1962,12 @@ app.post('/pagos/renovar-membresia', async (req, res) => {
     
     // Normalizar el tipo de membresía
     const membresiaLower = tipo_membresia.toLowerCase().trim();
-    const tiposValidos = ['dia', 'diaria', 'semanal', 'semana', 'quincenal', 'quincena', 'mensual', 'mensualidad', 'anual'];
+    const tiposValidos = ['diaria', 'semanal', 'quincenal', 'mensual', 'anual'];
     
     if (!tiposValidos.includes(membresiaLower)) {
         return res.status(400).json({ 
             success: false, 
-            message: 'Tipo de membresía inválido. Opciones: Dia, Semanal, Quincenal, Mensual, Anual' 
+            message: 'Tipo de membresía inválido. Opciones: diaria, semanal, quincenal, mensual, anual' 
         });
     }
     
@@ -2240,6 +2336,112 @@ app.delete('/ejercicios/:id', async (req, res) => {
 });
 
 // ==================== RUTINAS ====================
+
+// Estadísticas de rutinas (DEBE IR ANTES de /rutinas/:id)
+app.get('/rutinas/estadisticas', async (req, res) => {
+    try {
+        // Estadísticas generales de rutinas
+        const [stats] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_rutinas,
+                COUNT(CASE WHEN estado = 'activo' THEN 1 END) as rutinas_activas,
+                COUNT(CASE WHEN tipo = 'publica' THEN 1 END) as rutinas_publicas,
+                COUNT(CASE WHEN tipo = 'privada' THEN 1 END) as rutinas_privadas,
+                AVG(duracion_estimada) as duracion_promedio,
+                AVG(frecuencia_semanal) as frecuencia_promedio,
+                SUM(popularidad) as total_popularidad
+            FROM rutinas
+            WHERE estado = 'activo'
+        `);
+        
+        // Rutinas por objetivo
+        const [porObjetivo] = await pool.promise().query(`
+            SELECT 
+                objetivo,
+                COUNT(*) as cantidad,
+                AVG(duracion_estimada) as duracion_promedio
+            FROM rutinas
+            WHERE estado = 'activo'
+            GROUP BY objetivo
+            ORDER BY cantidad DESC
+        `);
+        
+        // Rutinas por nivel
+        const [porNivel] = await pool.promise().query(`
+            SELECT 
+                nivel,
+                COUNT(*) as cantidad,
+                AVG(popularidad) as popularidad_promedio
+            FROM rutinas
+            WHERE estado = 'activo'
+            GROUP BY nivel
+            ORDER BY FIELD(nivel, 'principiante', 'intermedio', 'avanzado')
+        `);
+        
+        // Rutinas más populares (top 5)
+        const [masPopulares] = await pool.promise().query(`
+            SELECT 
+                r.id, r.nombre, r.objetivo, r.nivel, r.popularidad,
+                r.duracion_estimada, r.frecuencia_semanal,
+                COUNT(DISTINCT re.ejercicio_id) as total_ejercicios,
+                u.nombre as creador_nombre
+            FROM rutinas r
+            LEFT JOIN rutinas_ejercicios re ON r.id = re.rutina_id
+            LEFT JOIN usuarios u ON r.usuario_id = u.id
+            WHERE r.estado = 'activo'
+            GROUP BY r.id
+            ORDER BY r.popularidad DESC
+            LIMIT 5
+        `);
+        
+        // Ejercicios más usados en rutinas
+        const [ejerciciosMasUsados] = await pool.promise().query(`
+            SELECT 
+                e.id, e.nombre, e.grupo_muscular, e.tipo,
+                COUNT(DISTINCT re.rutina_id) as veces_usado
+            FROM rutinas_ejercicios re
+            INNER JOIN ejercicios e ON re.ejercicio_id = e.id
+            INNER JOIN rutinas r ON re.rutina_id = r.id
+            WHERE r.estado = 'activo'
+            GROUP BY e.id
+            ORDER BY veces_usado DESC
+            LIMIT 10
+        `);
+        
+        // Total de ejercicios únicos en rutinas
+        const [totalEjercicios] = await pool.promise().query(`
+            SELECT COUNT(DISTINCT re.ejercicio_id) as total
+            FROM rutinas_ejercicios re
+            INNER JOIN rutinas r ON re.rutina_id = r.id
+            WHERE r.estado = 'activo'
+        `);
+        
+        // Rutinas creadas por mes (últimos 6 meses)
+        const [porMes] = await pool.promise().query(`
+            SELECT 
+                DATE_FORMAT(created_at, '%Y-%m') as mes,
+                DATE_FORMAT(created_at, '%M %Y') as mes_nombre,
+                COUNT(*) as cantidad
+            FROM rutinas
+            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+            GROUP BY mes, mes_nombre
+            ORDER BY mes DESC
+        `);
+        
+        res.json({
+            ...stats[0],
+            por_objetivo: porObjetivo,
+            por_nivel: porNivel,
+            mas_populares: masPopulares,
+            ejercicios_mas_usados: ejerciciosMasUsados,
+            total_ejercicios_unicos: totalEjercicios[0].total,
+            por_mes: porMes
+        });
+    } catch (error) {
+        console.error('Error en estadísticas de rutinas:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // Listar rutinas
 app.get('/rutinas', async (req, res) => {
