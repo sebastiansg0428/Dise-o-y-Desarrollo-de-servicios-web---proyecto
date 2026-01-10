@@ -104,14 +104,14 @@ app.post('/register', async (req, res) => {
     // Calcular precio y fecha de vencimiento según membresía
     // Opciones disponibles: diaria, semanal, quincenal, mensual, anual (COINCIDEN CON FRONTEND)
     const precios = { 
-        diaria: 4000,
-        semanal: 30000,
+        diaria: 6000,
+        semanal: 25000,
         quincenal: 40000,
         mensual: 60000,
         anual: 600000 
     };
     const membresiaLower = membresia.toLowerCase().trim(); // Convertir a minúsculas y quitar espacios
-    const precio_membresia = precios[membresiaLower] || 4000;
+    const precio_membresia = precios[membresiaLower] || 6000;
     
     // Obtener fecha actual SIN zona horaria
     const ahora = new Date();
@@ -237,8 +237,8 @@ app.post('/admin/clientes', async (req, res) => {
     // Calcular precio y fecha de vencimiento
     // Opciones disponibles: diaria, semanal, quincenal, mensual, anual
     const precios = { 
-        diaria: 4000,
-        semanal: 30000,
+        diaria: 6000,
+        semanal: 25000,
         quincenal: 40000,
         mensual: 60000,
         anual: 600000 
@@ -500,8 +500,8 @@ app.put('/usuarios/:id', async (req, res) => {
     if (membresia) { 
         const membresiaLower = membresia.toLowerCase().trim();
         const precios = { 
-            diaria: 4000,
-            semanal: 30000,
+            diaria: 6000,
+            semanal: 25000,
             quincenal: 40000,
             mensual: 60000,
             anual: 600000 
@@ -520,7 +520,7 @@ app.put('/usuarios/:id', async (req, res) => {
         updates.push('fecha_vencimiento = DATE_ADD(CURDATE(), INTERVAL ? DAY)');
         
         values.push(membresiaLower);
-        values.push(precios[membresiaLower] || 4000);
+        values.push(precios[membresiaLower] || 6000);
         values.push(diasMembresia[membresiaLower] || 1);
     }
     
@@ -1818,8 +1818,8 @@ app.post('/pagos', async (req, res) => {
                 anual: 365
             };
             const precios = {
-                diaria: 4000,
-                semanal: 30000,
+                diaria: 6000,
+                semanal: 25000,
                 quincenal: 40000,
                 mensual: 60000,
                 anual: 600000
@@ -1927,8 +1927,8 @@ app.put('/pagos/:id/pagar', async (req, res) => {
                 anual: 365
             };
             const precios = {
-                diaria: 4000,
-                semanal: 30000,
+                diaria: 6000,
+                semanal: 25000,
                 quincenal: 40000,
                 mensual: 60000,
                 anual: 600000
@@ -1994,7 +1994,7 @@ app.delete('/pagos/:id', async (req, res) => {
     }
 });
 
-// Renovar membresía con pago (usa procedimiento almacenado)
+// Renovar membresía con pago
 app.post('/pagos/renovar-membresia', async (req, res) => {
     const { usuario_id, tipo_membresia, metodo_pago, comprobante } = req.body;
     
@@ -2014,20 +2014,67 @@ app.post('/pagos/renovar-membresia', async (req, res) => {
     }
     
     try {
-        const [result] = await pool.promise().query(
-            'CALL sp_renovar_membresia_con_pago(?, ?, ?, ?, @pago_id, @factura_numero)',
-            [usuario_id, membresiaLower, metodo_pago || 'efectivo', comprobante]
+        // Obtener información del usuario
+        const [usuario] = await pool.promise().query(
+            'SELECT nombre, apellido FROM usuarios WHERE id = ?',
+            [usuario_id]
         );
         
-        const [output] = await pool.promise().query('SELECT @pago_id as pago_id, @factura_numero as factura_numero');
+        if (usuario.length === 0) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+        }
+        
+        // Configuración de membresías
+        const diasMembresia = {
+            diaria: 1,
+            semanal: 7,
+            quincenal: 15,
+            mensual: 30,
+            anual: 365
+        };
+        const precios = {
+            diaria: 6000,
+            semanal: 25000,
+            quincenal: 40000,
+            mensual: 60000,
+            anual: 600000
+        };
+        
+        const dias = diasMembresia[membresiaLower];
+        const precio = precios[membresiaLower];
+        
+        // Actualizar membresía del usuario
+        await pool.promise().query(
+            `UPDATE usuarios 
+             SET membresia = ?,
+                 precio_membresia = ?,
+                 fecha_inicio_membresia = CURDATE(),
+                 fecha_vencimiento = DATE_ADD(CURDATE(), INTERVAL ? DAY),
+                 estado = 'activo',
+                 updated_at = NOW()
+             WHERE id = ?`,
+            [membresiaLower, precio, dias, usuario_id]
+        );
+        
+        // Registrar el pago
+        const [pagoResult] = await pool.promise().query(
+            `INSERT INTO pagos (usuario_id, tipo_pago, concepto, monto, metodo_pago, comprobante, estado, fecha_pago)
+             VALUES (?, 'membresia', ?, ?, ?, ?, 'pagado', NOW())`,
+            [usuario_id, `Renovación Membresía ${membresiaLower}`, precio, metodo_pago || 'efectivo', comprobante || null]
+        );
+        
+        console.log(`✅ Membresía renovada: Usuario ${usuario_id} - ${membresiaLower} (${dias} días)`);
         
         res.json({
             success: true,
             message: 'Membresía renovada exitosamente',
-            pago_id: output[0].pago_id,
-            factura_numero: output[0].factura_numero
+            pago_id: pagoResult.insertId,
+            membresia: membresiaLower,
+            dias: dias,
+            precio: precio
         });
     } catch (error) {
+        console.error('❌ Error al renovar membresía:', error);
         res.status(500).json({ success: false, message: 'Error al renovar membresía', error: error.message });
     }
 });
@@ -3118,6 +3165,172 @@ app.get('/dashboard', async (req, res) => {
             error: error.message,
             detalles: 'Error al obtener datos del dashboard'
         });
+    }
+});
+
+// ==================== REPORTES ====================
+
+// Ingresos mensuales del año actual
+app.get('/reportes/ingresos-mensuales', async (req, res) => {
+    try {
+        const [ingresos] = await pool.promise().query(`
+            SELECT 
+                MONTH(fecha_pago) as mes,
+                MONTHNAME(fecha_pago) as nombre_mes,
+                SUM(monto) as total
+            FROM pagos
+            WHERE estado = 'pagado'
+            AND YEAR(fecha_pago) = YEAR(CURDATE())
+            GROUP BY MONTH(fecha_pago), MONTHNAME(fecha_pago)
+            ORDER BY mes
+        `);
+        res.json(ingresos);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Usuarios nuevos mensuales del año actual
+app.get('/reportes/usuarios-nuevos-mensuales', async (req, res) => {
+    try {
+        const [usuarios] = await pool.promise().query(`
+            SELECT 
+                MONTH(created_at) as mes,
+                MONTHNAME(created_at) as nombre_mes,
+                COUNT(*) as total
+            FROM usuarios
+            WHERE YEAR(created_at) = YEAR(CURDATE())
+            GROUP BY MONTH(created_at), MONTHNAME(created_at)
+            ORDER BY mes
+        `);
+        res.json(usuarios);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Productos más vendidos
+app.get('/reportes/productos-mas-vendidos', async (req, res) => {
+    try {
+        const [productos] = await pool.promise().query(`
+            SELECT 
+                p.id, p.nombre, p.categoria,
+                COUNT(v.id) as total_ventas,
+                SUM(v.cantidad) as cantidad_vendida,
+                SUM(v.total) as ingresos_totales
+            FROM productos p
+            LEFT JOIN ventas v ON p.id = v.producto_id
+            GROUP BY p.id
+            ORDER BY cantidad_vendida DESC, ingresos_totales DESC
+            LIMIT 10
+        `);
+        res.json(productos);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Rutinas más populares
+app.get('/reportes/rutinas-populares', async (req, res) => {
+    try {
+        const [rutinas] = await pool.promise().query(`
+            SELECT 
+                r.id, r.nombre, r.objetivo, r.nivel,
+                COUNT(DISTINCT ar.usuario_id) as usuarios_asignados,
+                AVG(ar.progreso_general) as progreso_promedio
+            FROM rutinas r
+            LEFT JOIN asignacion_rutinas ar ON r.id = ar.rutina_id
+            WHERE r.estado = 'activa'
+            GROUP BY r.id
+            ORDER BY usuarios_asignados DESC
+            LIMIT 10
+        `);
+        res.json(rutinas);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Usuarios con membresía por vencer
+app.get('/reportes/usuarios-con-membresia-por-vencer', async (req, res) => {
+    try {
+        const [usuarios] = await pool.promise().query(`
+            SELECT 
+                id, nombre, apellido, email, telefono, membresia,
+                DATE_FORMAT(fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
+                DATEDIFF(fecha_vencimiento, CURDATE()) as dias_restantes
+            FROM usuarios
+            WHERE estado = 'activo'
+            AND fecha_vencimiento >= CURDATE()
+            AND fecha_vencimiento <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+            ORDER BY fecha_vencimiento ASC
+        `);
+        res.json(usuarios);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Usuarios inactivos en los últimos 30 días
+app.get('/reportes/usuarios-inactivos', async (req, res) => {
+    try {
+        const [usuarios] = await pool.promise().query(`
+            SELECT 
+                id, nombre, apellido, email, telefono, membresia,
+                DATE_FORMAT(ultima_visita, "%d/%m/%Y") as ultima_visita,
+                DATEDIFF(CURDATE(), ultima_visita) as dias_inactivo
+            FROM usuarios
+            WHERE estado = 'activo'
+            AND (ultima_visita IS NULL OR ultima_visita < DATE_SUB(CURDATE(), INTERVAL 30 DAY))
+            ORDER BY ultima_visita ASC
+            LIMIT 50
+        `);
+        res.json(usuarios);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ventas por usuario
+app.get('/reportes/ventas-por-usuario', async (req, res) => {
+    try {
+        const [ventas] = await pool.promise().query(`
+            SELECT 
+                u.id, u.nombre, u.apellido,
+                COUNT(v.id) as total_compras,
+                SUM(v.total) as total_gastado
+            FROM usuarios u
+            LEFT JOIN ventas v ON u.id = v.usuario_id
+            GROUP BY u.id
+            HAVING total_compras > 0
+            ORDER BY total_gastado DESC
+            LIMIT 20
+        `);
+        res.json(ventas);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ventas por producto
+app.get('/reportes/ventas-por-producto', async (req, res) => {
+    try {
+        const [ventas] = await pool.promise().query(`
+            SELECT 
+                p.id, p.nombre, p.categoria,
+                COUNT(v.id) as numero_ventas,
+                SUM(v.cantidad) as unidades_vendidas,
+                SUM(v.total) as ingresos_totales,
+                AVG(v.precio_unitario) as precio_promedio
+            FROM productos p
+            LEFT JOIN ventas v ON p.id = v.producto_id
+            GROUP BY p.id
+            HAVING numero_ventas > 0
+            ORDER BY ingresos_totales DESC
+        `);
+        res.json(ventas);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
