@@ -125,16 +125,16 @@ app.post('/register', async (req, res) => {
     // Calcular días a sumar
     let diasASumar = 0;
     switch(membresiaLower) {
-        case 'dia':
+        case 'diaria':
             diasASumar = 1; 
             break;
-        case 'semana': 
+        case 'semanal': 
             diasASumar = 7; 
             break;
-        case 'quincena': 
+        case 'quincenal': 
             diasASumar = 15; 
             break;
-        case 'mensualidad': 
+        case 'mensual': 
             diasASumar = 30; 
             break;
         case 'anual': 
@@ -407,6 +407,48 @@ app.get('/usuarios/estadisticas', async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// Obtener usuarios con membresías activas (para renovación)
+app.get('/usuarios/membresias/activas', async (req, res) => {
+    try {
+        const [usuarios] = await pool.promise().query(`
+            SELECT 
+                u.id,
+                u.nombre,
+                u.apellido,
+                u.email,
+                u.telefono,
+                u.membresia,
+                u.precio_membresia,
+                DATE_FORMAT(u.fecha_inicio_membresia, "%d/%m/%Y") as fecha_inicio_membresia,
+                DATE_FORMAT(u.fecha_vencimiento, "%d/%m/%Y") as fecha_vencimiento,
+                DATEDIFF(u.fecha_vencimiento, CURDATE()) as dias_restantes,
+                CASE 
+                    WHEN u.fecha_vencimiento < CURDATE() THEN 'vencida'
+                    WHEN DATEDIFF(u.fecha_vencimiento, CURDATE()) <= 7 THEN 'por_vencer'
+                    ELSE 'vigente'
+                END as estado_membresia
+            FROM usuarios u
+            WHERE u.estado = 'activo'
+            AND u.fecha_vencimiento IS NOT NULL
+            AND u.fecha_vencimiento >= CURDATE()
+            ORDER BY u.fecha_vencimiento ASC
+        `);
+        
+        res.json({
+            success: true,
+            count: usuarios.length,
+            usuarios: usuarios
+        });
+    } catch (error) {
+        console.error('❌ Error al obtener membresías activas:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error al obtener membresías activas', 
+            error: error.message 
+        });
     }
 });
 
