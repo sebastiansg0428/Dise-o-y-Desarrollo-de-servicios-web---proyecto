@@ -1,9 +1,12 @@
 const express = require('express');
 const mysql = require('mysql2');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const { verificarToken } = require('./middleware/auth');
 
 const app = express();
 const port = 3001;
+const SECRET_KEY = 'gimnasio_secret_key_2026';
 
 // Middlewares - CORS mejorado para React
 app.use(cors({
@@ -36,14 +39,14 @@ const pool = mysql.createPool({
 // Al registrar: const hashedPassword = await bcrypt.hash(password, 10);
 // Al login: const match = await bcrypt.compare(password, user.password);
 
-// Login
+// Login con JWT
 app.post('/login', async (req, res) => {
     const { email, password } = req.body;
     
     try {
         const [rows] = await pool.promise().query(
-            'SELECT id, nombre, apellido, email, telefono, genero, membresia, estado, fecha_vencimiento FROM usuarios WHERE email = ? AND password = ? AND estado = "activo"',
-            [email, password]
+            'SELECT id, nombre, apellido, email, telefono, genero, membresia, estado, fecha_vencimiento, password FROM usuarios WHERE email = ? AND estado = "activo"',
+            [email]
         );
 
         if (rows.length === 0) {
@@ -52,14 +55,41 @@ app.post('/login', async (req, res) => {
 
         const user = rows[0];
         
+        // Verificar contraseña
+        if (user.password !== password) {
+            return res.status(401).json({ success: false, message: 'Credenciales inválidas' });
+        }
+        
         // Actualizar última visita
         await pool.promise().query(
             'UPDATE usuarios SET ultima_visita = NOW(), total_visitas = total_visitas + 1 WHERE id = ?',
             [user.id]
         );
 
-        res.json({ success: true, user });
+        // Generar token JWT
+        const token = jwt.sign(
+            {
+                id: user.id,
+                email: user.email,
+                nombre: user.nombre
+            },
+            SECRET_KEY,
+            { expiresIn: '24h' }
+        );
+
+        res.json({ 
+            success: true, 
+            token: token,
+            user: {
+                id: user.id,
+                nombre: user.nombre,
+                apellido: user.apellido,
+                email: user.email,
+                membresia: user.membresia
+            }
+        });
     } catch (error) {
+        console.error('Error en login:', error);
         res.status(500).json({ success: false, message: 'Error del servidor' });
     }
 });
@@ -332,8 +362,8 @@ app.post('/admin/clientes', async (req, res) => {
     }
 });
 
-// Listar usuarios
-app.get('/usuarios', async (req, res) => {
+// Listar usuarios (Protegido con JWT)
+app.get('/usuarios', verificarToken, async (req, res) => {
     const { estado, membresia, vencidos } = req.query;
     
     let query = `
