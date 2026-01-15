@@ -4,6 +4,10 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const { verificarToken } = require('./middleware/auth');
 
+// Importar middleware y utilidades RBAC
+const rbacMiddleware = require('./middleware/rbac');
+const rbacDb = require('./utils/rbacDb');
+
 const app = express();
 const port = 3001;
 const SECRET_KEY = 'gimnasio_secret_key_2026';
@@ -31,6 +35,10 @@ const pool = mysql.createPool({
     connectionLimit: 10,
     queueLimit: 0
 });
+
+// Inicializar RBAC con el pool de base de datos
+rbacMiddleware.initPool(pool);
+rbacDb.initRbacDb(pool);
 
 // ==================== USUARIOS ====================
 
@@ -92,6 +100,15 @@ app.post('/login', async (req, res) => {
         console.error('Error en login:', error);
         res.status(500).json({ success: false, message: 'Error del servidor' });
     }
+});
+
+// Verificar token (útil para React)
+app.get('/api/verify-token', verificarToken, (req, res) => {
+    res.json({ 
+        success: true, 
+        valid: true,
+        user: req.usuario 
+    });
 });
 
 // Registro de usuario (autoregistro público)
@@ -404,8 +421,8 @@ app.get('/usuarios', verificarToken, async (req, res) => {
     }
 });
 
-// Estadísticas de usuarios (DEBE IR ANTES de /usuarios/:id)
-app.get('/usuarios/estadisticas', async (req, res) => {
+// Estadísticas de usuarios (DEBE IR ANTES de /usuarios/:id) - Protegido con JWT
+app.get('/usuarios/estadisticas', verificarToken, async (req, res) => {
     try {
         const [stats] = await pool.promise().query(`
             SELECT 
@@ -3364,6 +3381,223 @@ app.get('/reportes/ventas-por-producto', async (req, res) => {
     }
 });
 
+// ==================== RBAC - GESTIÓN DE ROLES Y PERMISOS ====================
+
+// Obtener todos los roles
+app.get('/rbac/roles', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const roles = await rbacDb.obtenerTodosLosRoles();
+        res.json(roles);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Obtener todos los permisos
+app.get('/rbac/permisos', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const { recurso } = req.query;
+        const permisos = await rbacDb.obtenerTodosLosPermisos(recurso);
+        res.json(permisos);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Obtener permisos de un rol específico
+app.get('/rbac/roles/:rolNombre/permisos', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const { rolNombre } = req.params;
+        const permisos = await rbacDb.obtenerPermisosDeRol(rolNombre);
+        res.json(permisos);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Asignar rol a usuario
+app.post('/rbac/usuarios/:id/roles', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const usuarioId = parseInt(req.params.id);
+        const { rol } = req.body;
+        const asignadoPor = req.usuario.id;
+
+        if (!rol) {
+            return res.status(400).json({ error: 'El campo rol es requerido' });
+        }
+
+        const resultado = await rbacDb.asignarRol(usuarioId, rol, asignadoPor);
+        
+        if (resultado.success) {
+            res.json({ mensaje: resultado.mensaje, rolId: resultado.rolId });
+        } else {
+            res.status(400).json({ error: resultado.error });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Revocar rol de usuario
+app.delete('/rbac/usuarios/:id/roles/:rolNombre', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const usuarioId = parseInt(req.params.id);
+        const { rolNombre } = req.params;
+
+        const resultado = await rbacDb.revocarRol(usuarioId, rolNombre);
+        
+        if (resultado.success) {
+            res.json({ mensaje: resultado.mensaje });
+        } else {
+            res.status(400).json({ error: resultado.error });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Obtener roles y permisos de un usuario específico
+app.get('/rbac/usuarios/:id/roles', verificarToken, rbacMiddleware.esPropioDuenioOAdmin(), async (req, res) => {
+    try {
+        const usuarioId = parseInt(req.params.id);
+        
+        const roles = await rbacMiddleware.obtenerRolesUsuario(usuarioId);
+        const permisos = await rbacMiddleware.obtenerPermisosUsuario(usuarioId);
+        
+        res.json({
+            usuario_id: usuarioId,
+            roles: roles,
+            permisos: permisos
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Asignar permiso a rol
+app.post('/rbac/roles/:rolNombre/permisos', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const { rolNombre } = req.params;
+        const { permiso } = req.body;
+
+        if (!permiso) {
+            return res.status(400).json({ error: 'El campo permiso es requerido' });
+        }
+
+        const resultado = await rbacDb.asignarPermisoARol(rolNombre, permiso);
+        
+        if (resultado.success) {
+            res.json({ mensaje: resultado.mensaje });
+        } else {
+            res.status(400).json({ error: resultado.error });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Revocar permiso de rol
+app.delete('/rbac/roles/:rolNombre/permisos/:permisoNombre', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const { rolNombre, permisoNombre } = req.params;
+
+        const resultado = await rbacDb.revocarPermisoDeRol(rolNombre, permisoNombre);
+        
+        if (resultado.success) {
+            res.json({ mensaje: resultado.mensaje });
+        } else {
+            res.status(400).json({ error: resultado.error });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Crear nuevo rol
+app.post('/rbac/roles', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const { nombre, descripcion, nivel } = req.body;
+
+        if (!nombre) {
+            return res.status(400).json({ error: 'El nombre del rol es requerido' });
+        }
+
+        const resultado = await rbacDb.crearRol(nombre, descripcion, nivel || 10);
+        
+        if (resultado.success) {
+            res.status(201).json({ mensaje: resultado.mensaje, rolId: resultado.rolId });
+        } else {
+            res.status(400).json({ error: resultado.error });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Crear nuevo permiso
+app.post('/rbac/permisos', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const { nombre, descripcion, recurso, accion } = req.body;
+
+        if (!nombre || !recurso || !accion) {
+            return res.status(400).json({ 
+                error: 'Los campos nombre, recurso y accion son requeridos' 
+            });
+        }
+
+        const resultado = await rbacDb.crearPermiso(nombre, descripcion, recurso, accion);
+        
+        if (resultado.success) {
+            res.status(201).json({ mensaje: resultado.mensaje, permisoId: resultado.permisoId });
+        } else {
+            res.status(400).json({ error: resultado.error });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Estadísticas del sistema RBAC
+app.get('/rbac/estadisticas', verificarToken, rbacMiddleware.esAdmin(), async (req, res) => {
+    try {
+        const stats = await rbacDb.obtenerEstadisticasRBAC();
+        res.json(stats);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Obtener información completa del usuario autenticado (con roles y permisos)
+app.get('/me', verificarToken, async (req, res) => {
+    try {
+        const usuarioId = req.usuario.id;
+        
+        // Obtener información del usuario
+        const [usuarios] = await pool.promise().query(
+            'SELECT id, nombre, apellido, email, telefono, genero, estado, membresia FROM usuarios WHERE id = ?',
+            [usuarioId]
+        );
+
+        if (usuarios.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const usuario = usuarios[0];
+        
+        // Obtener roles y permisos
+        const roles = await rbacMiddleware.obtenerRolesUsuario(usuarioId);
+        const permisos = await rbacMiddleware.obtenerPermisosUsuario(usuarioId);
+        
+        res.json({
+            ...usuario,
+            roles: roles,
+            permisos: permisos
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Iniciar servidor
 app.listen(port, () => {
     console.log(`🏋️ Sistema de Gimnasio corriendo en http://localhost:${port}`);
@@ -3461,5 +3695,17 @@ app.listen(port, () => {
     console.log('  POST /facturas - Crear factura');
     console.log('  PUT /facturas/:id - Actualizar factura');
     console.log('  DELETE /facturas/:id - Eliminar factura');
+    
+    console.log('\n🔒 RBAC - ROLES Y PERMISOS:');
+    console.log('  GET /rbac/roles - Listar todos los roles (solo admin)');
+    console.log('  GET /rbac/permisos - Listar todos los permisos (solo admin)');
+    console.log('  GET /rbac/roles/:rolNombre/permisos - Ver permisos de un rol');
+    console.log('  GET /rbac/usuarios/:id/roles - Ver roles y permisos de un usuario');
+    console.log('  POST /rbac/usuarios/:id/roles - Asignar rol a usuario (solo admin)');
+    console.log('  DELETE /rbac/usuarios/:id/roles/:rolNombre - Revocar rol (solo admin)');
+    console.log('  POST /rbac/roles - Crear nuevo rol (solo admin)');
+    console.log('  POST /rbac/permisos - Crear nuevo permiso (solo admin)');
+    console.log('  GET /rbac/estadisticas - Estadísticas del sistema RBAC');
+    console.log('  GET /me - Información completa del usuario autenticado');
     
 });
