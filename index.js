@@ -1507,6 +1507,62 @@ app.delete('/sesiones/:id', async (req, res) => {
     }
 });
 
+// Listar todas las sesiones (con filtros)
+app.get('/sesiones', async (req, res) => {
+    const { fecha_desde, fecha_hasta, usuario_id, entrenador_id, estado } = req.query;
+    
+    let query = `
+        SELECT s.*, 
+               e.nombre as entrenador_nombre, e.apellido as entrenador_apellido,
+               u.nombre as usuario_nombre, u.apellido as usuario_apellido,
+               r.nombre as rutina_nombre,
+               DATE_FORMAT(s.fecha, "%d/%m/%Y %H:%i") as fecha_programada,
+               DATE_FORMAT(s.created_at, "%d/%m/%Y") as fecha_registro
+        FROM sesiones_entrenamiento s
+        LEFT JOIN entrenadores e ON s.entrenador_id = e.id
+        LEFT JOIN usuarios u ON s.usuario_id = u.id
+        LEFT JOIN rutinas r ON s.rutina_id = r.id
+        WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    if (fecha_desde) {
+        query += ' AND DATE(s.fecha) >= ?';
+        params.push(fecha_desde);
+    }
+    
+    if (fecha_hasta) {
+        query += ' AND DATE(s.fecha) <= ?';
+        params.push(fecha_hasta);
+    }
+    
+    if (usuario_id) {
+        query += ' AND s.usuario_id = ?';
+        params.push(usuario_id);
+    }
+    
+    if (entrenador_id) {
+        query += ' AND s.entrenador_id = ?';
+        params.push(entrenador_id);
+    }
+    
+    if (estado) {
+        query += ' AND s.estado = ?';
+        params.push(estado);
+    }
+    
+    query += ' ORDER BY s.fecha DESC LIMIT 100';
+    
+    try {
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error al listar sesiones:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Ver sesión individual
 app.get('/sesiones/:id', async (req, res) => {
     const { id } = req.params;
@@ -1734,6 +1790,125 @@ app.get('/pagos/estadisticas/membresias', async (req, res) => {
         });
     } catch (error) {
         console.error('Error en estadísticas de membresías:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Estadísticas de productos vendidos
+app.get('/pagos/estadisticas/productos', async (req, res) => {
+    try {
+        // Productos más vendidos (últimos 30 días)
+        const [productosMasVendidos] = await pool.promise().query(`
+            SELECT 
+                p.id,
+                p.nombre,
+                p.categoria,
+                COUNT(v.id) as cantidad_vendidas,
+                COALESCE(SUM(v.cantidad), 0) as unidades_vendidas,
+                COALESCE(SUM(v.total), 0) as ingresos_totales,
+                COALESCE(AVG(v.precio_unitario), 0) as precio_promedio,
+                MAX(v.created_at) as ultima_venta
+            FROM productos p
+            LEFT JOIN ventas v ON p.id = v.producto_id AND v.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+            GROUP BY p.id, p.nombre, p.categoria
+            HAVING unidades_vendidas > 0
+            ORDER BY unidades_vendidas DESC
+            LIMIT 10
+        `);
+
+        // Ingresos por productos del mes actual
+        const [ingresosMes] = await pool.promise().query(`
+            SELECT 
+                COALESCE(SUM(total), 0) as ingresos_mes,
+                COUNT(*) as total_ventas
+            FROM ventas
+            WHERE MONTH(created_at) = MONTH(CURDATE())
+            AND YEAR(created_at) = YEAR(CURDATE())
+        `);
+
+        // Productos por categoría (últimos 30 días)
+        const [porCategoria] = await pool.promise().query(`
+            SELECT 
+                p.categoria,
+                COUNT(DISTINCT p.id) as productos_categoria,
+                COALESCE(SUM(v.cantidad), 0) as unidades_vendidas,
+                COALESCE(SUM(v.total), 0) as ingresos_totales
+            FROM productos p
+            LEFT JOIN ventas v ON p.id = v.producto_id AND v.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+            GROUP BY p.categoria
+            ORDER BY ingresos_totales DESC
+        `);
+
+        res.json({
+            productosMasVendidos,
+            ingresosMesActual: ingresosMes[0]?.ingresos_mes || 0,
+            totalVentas: ingresosMes[0]?.total_ventas || 0,
+            porCategoria
+        });
+    } catch (error) {
+        console.error('Error en estadísticas de productos:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Estadísticas de sesiones con entrenadores
+app.get('/pagos/estadisticas/sesiones', async (req, res) => {
+    try {
+        // Ingresos por sesiones del mes
+        const [ingresosSesiones] = await pool.promise().query(`
+            SELECT 
+                COALESCE(SUM(monto), 0) as ingresos_mes,
+                COUNT(*) as total_pagos_sesiones
+            FROM pagos
+            WHERE tipo_pago = 'sesion'
+            AND estado = 'pagado'
+            AND MONTH(fecha_pago) = MONTH(CURDATE())
+            AND YEAR(fecha_pago) = YEAR(CURDATE())
+        `);
+
+        // Entrenadores activos
+        const [entrenadoresData] = await pool.promise().query(`
+            SELECT 
+                e.id,
+                e.nombre,
+                e.apellido,
+                e.especialidad_principal
+            FROM entrenadores e
+            WHERE e.estado = 'activo'
+            LIMIT 10
+        `);
+
+        // Total de entrenadores
+        const [totalEntrenadores] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_entrenadores,
+                SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as activos
+            FROM entrenadores
+        `);
+
+        // Pagos de sesiones por estado (mes actual)
+        const [porEstado] = await pool.promise().query(`
+            SELECT 
+                estado,
+                COUNT(*) as cantidad,
+                COALESCE(SUM(monto), 0) as total_monto
+            FROM pagos
+            WHERE tipo_pago = 'sesion'
+            AND MONTH(fecha_pago) = MONTH(CURDATE())
+            AND YEAR(fecha_pago) = YEAR(CURDATE())
+            GROUP BY estado
+        `);
+
+        res.json({
+            ingresosMesActual: ingresosSesiones[0]?.ingresos_mes || 0,
+            totalPagosSesiones: ingresosSesiones[0]?.total_pagos_sesiones || 0,
+            entrenadoresActivos: entrenadoresData,
+            totalEntrenadores: totalEntrenadores[0]?.total_entrenadores || 0,
+            entrenadoresActivosCount: totalEntrenadores[0]?.activos || 0,
+            pagosPorEstado: porEstado
+        });
+    } catch (error) {
+        console.error('Error en estadísticas de sesiones:', error);
         res.status(500).json({ error: error.message });
     }
 });
