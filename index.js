@@ -2648,112 +2648,6 @@ app.delete('/ejercicios/:id', async (req, res) => {
 
 // ==================== RUTINAS ====================
 
-// Estadísticas de rutinas (DEBE IR ANTES de /rutinas/:id)
-app.get('/rutinas/estadisticas', async (req, res) => {
-    try {
-        // Estadísticas generales de rutinas
-        const [stats] = await pool.promise().query(`
-            SELECT 
-                COUNT(*) as total_rutinas,
-                COUNT(CASE WHEN estado = 'activo' THEN 1 END) as rutinas_activas,
-                COUNT(CASE WHEN tipo = 'publica' THEN 1 END) as rutinas_publicas,
-                COUNT(CASE WHEN tipo = 'privada' THEN 1 END) as rutinas_privadas,
-                AVG(duracion_estimada) as duracion_promedio,
-                AVG(frecuencia_semanal) as frecuencia_promedio,
-                SUM(popularidad) as total_popularidad
-            FROM rutinas
-            WHERE estado = 'activo'
-        `);
-        
-        // Rutinas por objetivo
-        const [porObjetivo] = await pool.promise().query(`
-            SELECT 
-                objetivo,
-                COUNT(*) as cantidad,
-                AVG(duracion_estimada) as duracion_promedio
-            FROM rutinas
-            WHERE estado = 'activo'
-            GROUP BY objetivo
-            ORDER BY cantidad DESC
-        `);
-        
-        // Rutinas por nivel
-        const [porNivel] = await pool.promise().query(`
-            SELECT 
-                nivel,
-                COUNT(*) as cantidad,
-                AVG(popularidad) as popularidad_promedio
-            FROM rutinas
-            WHERE estado = 'activo'
-            GROUP BY nivel
-            ORDER BY FIELD(nivel, 'principiante', 'intermedio', 'avanzado')
-        `);
-        
-        // Rutinas más populares (top 5)
-        const [masPopulares] = await pool.promise().query(`
-            SELECT 
-                r.id, r.nombre, r.objetivo, r.nivel, r.popularidad,
-                r.duracion_estimada, r.frecuencia_semanal,
-                COUNT(DISTINCT re.ejercicio_id) as total_ejercicios,
-                u.nombre as creador_nombre
-            FROM rutinas r
-            LEFT JOIN rutinas_ejercicios re ON r.id = re.rutina_id
-            LEFT JOIN usuarios u ON r.usuario_id = u.id
-            WHERE r.estado = 'activo'
-            GROUP BY r.id
-            ORDER BY r.popularidad DESC
-            LIMIT 5
-        `);
-        
-        // Ejercicios más usados en rutinas
-        const [ejerciciosMasUsados] = await pool.promise().query(`
-            SELECT 
-                e.id, e.nombre, e.grupo_muscular, e.tipo,
-                COUNT(DISTINCT re.rutina_id) as veces_usado
-            FROM rutinas_ejercicios re
-            INNER JOIN ejercicios e ON re.ejercicio_id = e.id
-            INNER JOIN rutinas r ON re.rutina_id = r.id
-            WHERE r.estado = 'activo'
-            GROUP BY e.id
-            ORDER BY veces_usado DESC
-            LIMIT 10
-        `);
-        
-        // Total de ejercicios únicos en rutinas
-        const [totalEjercicios] = await pool.promise().query(`
-            SELECT COUNT(DISTINCT re.ejercicio_id) as total
-            FROM rutinas_ejercicios re
-            INNER JOIN rutinas r ON re.rutina_id = r.id
-            WHERE r.estado = 'activo'
-        `);
-        
-        // Rutinas creadas por mes (últimos 6 meses)
-        const [porMes] = await pool.promise().query(`
-            SELECT 
-                DATE_FORMAT(created_at, '%Y-%m') as mes,
-                DATE_FORMAT(created_at, '%M %Y') as mes_nombre,
-                COUNT(*) as cantidad
-            FROM rutinas
-            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-            GROUP BY mes, mes_nombre
-            ORDER BY mes DESC
-        `);
-        
-        res.json({
-            ...stats[0],
-            por_objetivo: porObjetivo,
-            por_nivel: porNivel,
-            mas_populares: masPopulares,
-            ejercicios_mas_usados: ejerciciosMasUsados,
-            total_ejercicios_unicos: totalEjercicios[0].total,
-            por_mes: porMes
-        });
-    } catch (error) {
-        console.error('Error en estadísticas de rutinas:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
 // Listar rutinas
 app.get('/rutinas', async (req, res) => {
     const { objetivo, nivel, tipo, usuario_id } = req.query;
@@ -2798,6 +2692,105 @@ app.get('/rutinas', async (req, res) => {
         const [rows] = await pool.promise().query(query, params);
         res.json(rows);
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Estadísticas de rutinas (DEBE IR ANTES de /rutinas/:id)
+app.get('/rutinas/estadisticas', async (req, res) => {
+    try {
+        // Estadísticas generales de rutinas
+        const [stats] = await pool.promise().query(`
+            SELECT 
+                COUNT(DISTINCT r.id) as total_rutinas,
+                COUNT(DISTINCT CASE WHEN r.tipo = 'publica' THEN r.id END) as rutinas_publicas,
+                COUNT(DISTINCT CASE WHEN r.tipo = 'personalizada' THEN r.id END) as rutinas_personalizadas,
+                COUNT(DISTINCT CASE WHEN r.estado = 'activo' THEN r.id END) as rutinas_activas,
+                AVG(r.duracion_estimada) as duracion_promedio,
+                AVG(r.frecuencia_semanal) as frecuencia_promedio
+            FROM rutinas r
+            WHERE r.estado = 'activo'
+        `);
+
+        // Total de asignaciones de rutinas
+        const [asignaciones] = await pool.promise().query(`
+            SELECT COUNT(*) as total_asignaciones
+            FROM usuarios_rutinas
+        `);
+
+        // Usuarios con rutinas asignadas
+        const [usuariosConRutinas] = await pool.promise().query(`
+            SELECT COUNT(DISTINCT usuario_id) as usuarios_con_rutinas
+            FROM usuarios_rutinas
+        `);
+
+        // Rutina más popular (más asignada)
+        const [rutinaMasPopular] = await pool.promise().query(`
+            SELECT 
+                r.id,
+                r.nombre,
+                r.objetivo,
+                r.nivel,
+                COUNT(ur.id) as total_asignaciones,
+                COUNT(CASE WHEN ur.estado = 'en_progreso' THEN 1 END) as en_progreso,
+                COUNT(CASE WHEN ur.estado = 'completada' THEN 1 END) as completadas
+            FROM rutinas r
+            INNER JOIN usuarios_rutinas ur ON r.id = ur.rutina_id
+            WHERE r.estado = 'activo'
+            GROUP BY r.id
+            ORDER BY total_asignaciones DESC
+            LIMIT 1
+        `);
+
+        // Asignaciones por estado
+        const [porEstado] = await pool.promise().query(`
+            SELECT 
+                estado,
+                COUNT(*) as cantidad
+            FROM usuarios_rutinas
+            GROUP BY estado
+        `);
+
+        // Rutinas por objetivo
+        const [porObjetivo] = await pool.promise().query(`
+            SELECT 
+                objetivo,
+                COUNT(*) as cantidad,
+                AVG(duracion_estimada) as duracion_promedio
+            FROM rutinas
+            WHERE estado = 'activo'
+            GROUP BY objetivo
+            ORDER BY cantidad DESC
+        `);
+
+        // Top 5 rutinas más populares
+        const [populares] = await pool.promise().query(`
+            SELECT 
+                r.id,
+                r.nombre,
+                r.objetivo,
+                r.nivel,
+                r.duracion_estimada,
+                COUNT(ur.id) as total_asignaciones
+            FROM rutinas r
+            LEFT JOIN usuarios_rutinas ur ON r.id = ur.rutina_id
+            WHERE r.estado = 'activo'
+            GROUP BY r.id
+            ORDER BY total_asignaciones DESC
+            LIMIT 5
+        `);
+        
+        res.json({
+            ...stats[0],
+            total_asignaciones: asignaciones[0]?.total_asignaciones || 0,
+            usuarios_con_rutinas: usuariosConRutinas[0]?.usuarios_con_rutinas || 0,
+            rutina_mas_popular: rutinaMasPopular[0] || null,
+            asignaciones_por_estado: porEstado,
+            por_objetivo: porObjetivo,
+            rutinas_populares: populares
+        });
+    } catch (error) {
+        console.error('Error en estadísticas de rutinas:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -3139,41 +3132,6 @@ app.put('/usuarios/:usuario_id/rutinas/:asignacion_id', async (req, res) => {
         res.json({ success: true, message: 'Progreso actualizado correctamente' });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Error al actualizar progreso' });
-    }
-});
-
-// Estadísticas de rutinas
-app.get('/rutinas/estadisticas', async (req, res) => {
-    try {
-        const [stats] = await pool.promise().query(`
-            SELECT 
-                COUNT(DISTINCT r.id) as total_rutinas,
-                COUNT(DISTINCT CASE WHEN r.tipo = 'publica' THEN r.id END) as rutinas_publicas,
-                COUNT(DISTINCT CASE WHEN r.tipo = 'personalizada' THEN r.id END) as rutinas_personalizadas,
-                COUNT(DISTINCT e.id) as total_ejercicios,
-                COUNT(DISTINCT ur.id) as total_asignaciones,
-                COUNT(DISTINCT CASE WHEN ur.estado = 'en_progreso' THEN ur.id END) as rutinas_en_progreso,
-                COUNT(DISTINCT CASE WHEN ur.estado = 'completada' THEN ur.id END) as rutinas_completadas
-            FROM rutinas r
-            LEFT JOIN ejercicios e ON e.estado = 'activo'
-            LEFT JOIN usuarios_rutinas ur ON r.id = ur.rutina_id
-            WHERE r.estado = 'activo'
-        `);
-        
-        const [populares] = await pool.promise().query(`
-            SELECT id, nombre, objetivo, nivel, popularidad
-            FROM rutinas
-            WHERE estado = 'activo' AND tipo = 'publica'
-            ORDER BY popularidad DESC
-            LIMIT 5
-        `);
-        
-        res.json({
-            ...stats[0],
-            rutinas_populares: populares
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
     }
 });
 
