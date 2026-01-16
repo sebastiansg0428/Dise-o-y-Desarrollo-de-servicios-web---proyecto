@@ -971,22 +971,23 @@ app.get('/entrenadores/estadisticas', async (req, res) => {
             SELECT 
                 COUNT(*) as total_entrenadores,
                 SUM(CASE WHEN estado = 'activo' THEN 1 ELSE 0 END) as entrenadores_activos,
-                AVG(tarifa_rutina) as tarifa_promedio
+                COALESCE(AVG(CAST(tarifa_rutina AS DECIMAL(10,2))), 0) as tarifa_promedio
             FROM entrenadores
         `);
 
-        // Total de clientes asignados a todos los entrenadores
+        // Total de clientes asignados
         const [clientesStats] = await pool.promise().query(`
             SELECT COUNT(DISTINCT usuario_id) as total_clientes_asignados
             FROM entrenadores_clientes
             WHERE estado = 'activo'
         `);
 
-        // Sesiones programadas (futuras)
+        // Sesiones programadas y completadas
         const [sesionesStats] = await pool.promise().query(`
-            SELECT COUNT(*) as sesiones_programadas
+            SELECT 
+                COUNT(CASE WHEN fecha >= CURDATE() AND estado IN ('programada', 'en_progreso') THEN 1 END) as sesiones_programadas,
+                COUNT(CASE WHEN estado = 'completada' THEN 1 END) as sesiones_completadas
             FROM sesiones_entrenamiento
-            WHERE fecha_sesion >= CURDATE() AND estado IN ('pendiente', 'confirmada')
         `);
 
         // Estadísticas de valoraciones
@@ -999,27 +1000,37 @@ app.get('/entrenadores/estadisticas', async (req, res) => {
 
         // Top 5 entrenadores mejor valorados
         const [ranking] = await pool.promise().query(`
-            SELECT e.id, e.nombre, e.apellido, e.especialidad_principal,
-                   COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
-                   COUNT(DISTINCT ec.usuario_id) as total_clientes
+            SELECT 
+                e.id, 
+                e.nombre, 
+                e.apellido, 
+                e.especialidad_principal,
+                COALESCE(AVG(v.puntuacion), 0) as promedio_puntuacion,
+                COUNT(DISTINCT ec.usuario_id) as total_clientes,
+                CAST(e.tarifa_rutina AS UNSIGNED) as tarifa_rutina,
+                e.experiencia_anios
             FROM entrenadores e
             LEFT JOIN valoraciones_entrenadores v ON v.entrenador_id = e.id
-            LEFT JOIN entrenadores_clientes ec ON ec.entrenador_id = e.id
+            LEFT JOIN entrenadores_clientes ec ON ec.entrenador_id = e.id AND ec.estado = 'activo'
             WHERE e.estado = 'activo'
-            GROUP BY e.id
+            GROUP BY e.id, e.nombre, e.apellido, e.especialidad_principal, e.tarifa_rutina, e.experiencia_anios
             ORDER BY promedio_puntuacion DESC, total_clientes DESC
             LIMIT 5
         `);
 
         res.json({ 
-            ...stats[0],
-            total_clientes_asignados: clientesStats[0].total_clientes_asignados,
-            sesiones_programadas: sesionesStats[0].sesiones_programadas,
-            total_valoraciones: valoracionesStats[0].total_valoraciones,
-            promedio_valoraciones: parseFloat(valoracionesStats[0].promedio_valoraciones.toFixed(2)),
+            total_entrenadores: stats[0].total_entrenadores || 0,
+            entrenadores_activos: stats[0].entrenadores_activos || 0,
+            tarifa_promedio: parseFloat((stats[0].tarifa_promedio || 0)),
+            total_clientes_asignados: clientesStats[0].total_clientes_asignados || 0,
+            sesiones_programadas: sesionesStats[0].sesiones_programadas || 0,
+            sesiones_completadas: sesionesStats[0].sesiones_completadas || 0,
+            total_valoraciones: valoracionesStats[0].total_valoraciones || 0,
+            promedio_valoraciones: parseFloat((valoracionesStats[0].promedio_valoraciones || 0)),
             top_entrenadores: ranking 
         });
     } catch (error) {
+        console.error('Error en /entrenadores/estadisticas:', error);
         res.status(500).json({ error: error.message });
     }
 });
