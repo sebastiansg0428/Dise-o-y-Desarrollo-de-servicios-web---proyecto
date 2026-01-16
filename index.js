@@ -3426,18 +3426,21 @@ app.get('/reportes/rutinas-populares', async (req, res) => {
     try {
         const [rutinas] = await pool.promise().query(`
             SELECT 
-                r.id, r.nombre, r.objetivo, r.nivel,
-                COUNT(DISTINCT ar.usuario_id) as usuarios_asignados,
-                AVG(ar.progreso_general) as progreso_promedio
+                r.id, 
+                r.nombre, 
+                r.objetivo, 
+                r.nivel,
+                COUNT(DISTINCT ur.usuario_id) as usuarios_asignados
             FROM rutinas r
-            LEFT JOIN asignacion_rutinas ar ON r.id = ar.rutina_id
+            LEFT JOIN usuarios_rutinas ur ON r.id = ur.rutina_id
             WHERE r.estado = 'activa'
-            GROUP BY r.id
+            GROUP BY r.id, r.nombre, r.objetivo, r.nivel
             ORDER BY usuarios_asignados DESC
             LIMIT 10
         `);
         res.json(rutinas);
     } catch (error) {
+        console.error('Error en /reportes/rutinas-populares:', error);
         res.status(500).json({ error: error.message });
     }
 });
