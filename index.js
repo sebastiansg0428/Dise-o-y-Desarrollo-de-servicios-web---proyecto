@@ -961,6 +961,273 @@ app.get('/ventas', async (req, res) => {
     }
 });
 
+// Crear venta directa
+app.post('/ventas', async (req, res) => {
+    const { usuario_id, producto_id, cantidad, metodo_pago = 'efectivo' } = req.body;
+    
+    if (!producto_id || !cantidad || cantidad <= 0) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'producto_id y cantidad son requeridos. Cantidad debe ser mayor a 0' 
+        });
+    }
+    
+    const connection = await pool.promise().getConnection();
+    
+    try {
+        await connection.beginTransaction();
+        
+        // Verificar producto y stock con bloqueo
+        const [producto] = await connection.query(
+            'SELECT id, nombre, stock, precio_venta FROM productos WHERE id = ? AND estado = "activo" FOR UPDATE',
+            [producto_id]
+        );
+        
+        if (producto.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Producto no encontrado o inactivo' 
+            });
+        }
+        
+        if (producto[0].stock < cantidad) {
+            await connection.rollback();
+            return res.status(400).json({ 
+                success: false, 
+                message: `Stock insuficiente. Disponible: ${producto[0].stock}` 
+            });
+        }
+        
+        const precio_unitario = producto[0].precio_venta;
+        const total = precio_unitario * cantidad;
+        
+        // Registrar venta
+        const [ventaResult] = await connection.query(
+            `INSERT INTO ventas (usuario_id, producto_id, cantidad, precio_unitario, total, metodo_pago) 
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [usuario_id || null, producto_id, cantidad, precio_unitario, total, metodo_pago]
+        );
+        
+        // Actualizar stock del producto
+        await connection.query(
+            'UPDATE productos SET stock = stock - ?, updated_at = NOW() WHERE id = ?',
+            [cantidad, producto_id]
+        );
+        
+        await connection.commit();
+        
+        res.status(201).json({ 
+            success: true, 
+            id: ventaResult.insertId,
+            message: `Venta registrada exitosamente: ${cantidad} x ${producto[0].nombre}`,
+            detalles: {
+                producto: producto[0].nombre,
+                cantidad: cantidad,
+                precio_unitario: precio_unitario,
+                total: total,
+                stock_restante: producto[0].stock - cantidad
+            }
+        });
+    } catch (error) {
+        await connection.rollback();
+        console.error('Error al crear venta:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error al procesar venta', 
+            error: error.message 
+        });
+    } finally {
+        connection.release();
+    }
+});
+
+// Historial de compras de un usuario específico
+app.get('/ventas/usuario/:id', async (req, res) => {
+    const { id } = req.params;
+    const { fecha_desde, fecha_hasta, limit = 50 } = req.query;
+    
+    let query = `
+        SELECT 
+            v.id,
+            v.cantidad,
+            v.precio_unitario,
+            v.total,
+            v.metodo_pago,
+            DATE_FORMAT(v.created_at, "%d/%m/%Y %H:%i") as fecha_venta,
+            p.id as producto_id,
+            p.nombre as producto_nombre,
+            p.categoria as producto_categoria
+        FROM ventas v
+        INNER JOIN productos p ON v.producto_id = p.id
+        WHERE v.usuario_id = ?
+    `;
+    
+    const params = [id];
+    
+    if (fecha_desde) {
+        query += ' AND DATE(v.created_at) >= ?';
+        params.push(fecha_desde);
+    }
+    
+    if (fecha_hasta) {
+        query += ' AND DATE(v.created_at) <= ?';
+        params.push(fecha_hasta);
+    }
+    
+    query += ` ORDER BY v.created_at DESC LIMIT ${parseInt(limit)}`;
+
+    try {
+        const [ventas] = await pool.promise().query(query, params);
+        
+        // Obtener estadísticas del usuario
+        const [stats] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_compras,
+                SUM(total) as total_gastado,
+                AVG(total) as promedio_por_compra,
+                MAX(total) as compra_maxima,
+                DATE_FORMAT(MAX(created_at), "%d/%m/%Y") as ultima_compra
+            FROM ventas
+            WHERE usuario_id = ?
+        `, [id]);
+        
+        res.json({
+            usuario_id: parseInt(id),
+            estadisticas: stats[0] || {
+                total_compras: 0,
+                total_gastado: 0,
+                promedio_por_compra: 0,
+                compra_maxima: 0,
+                ultima_compra: null
+            },
+            historial: ventas
+        });
+    } catch (error) {
+        console.error('Error al obtener historial de ventas:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Estadísticas generales de ventas
+app.get('/ventas/estadisticas', async (req, res) => {
+    try {
+        // Estadísticas generales
+        const [statsGenerales] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_ventas,
+                SUM(total) as ingresos_totales,
+                AVG(total) as ticket_promedio,
+                SUM(cantidad) as productos_vendidos
+            FROM ventas
+        `);
+        
+        // Ventas de hoy
+        const [ventasHoy] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as ventas_hoy,
+                COALESCE(SUM(total), 0) as ingresos_hoy,
+                COALESCE(SUM(cantidad), 0) as productos_vendidos_hoy
+            FROM ventas 
+            WHERE DATE(created_at) = CURDATE()
+        `);
+        
+        // Ventas del mes actual
+        const [ventasMes] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as ventas_mes,
+                COALESCE(SUM(total), 0) as ingresos_mes,
+                COALESCE(SUM(cantidad), 0) as productos_vendidos_mes
+            FROM ventas 
+            WHERE MONTH(created_at) = MONTH(CURDATE()) 
+            AND YEAR(created_at) = YEAR(CURDATE())
+        `);
+        
+        // Top 5 productos más vendidos
+        const [topProductos] = await pool.promise().query(`
+            SELECT 
+                p.id,
+                p.nombre,
+                p.categoria,
+                SUM(v.cantidad) as cantidad_vendida,
+                COUNT(v.id) as numero_ventas,
+                SUM(v.total) as ingresos_generados
+            FROM ventas v
+            INNER JOIN productos p ON v.producto_id = p.id
+            GROUP BY p.id, p.nombre, p.categoria
+            ORDER BY cantidad_vendida DESC
+            LIMIT 5
+        `);
+        
+        // Top 5 clientes que más compran
+        const [topClientes] = await pool.promise().query(`
+            SELECT 
+                u.id,
+                u.nombre,
+                u.apellido,
+                u.email,
+                COUNT(v.id) as total_compras,
+                SUM(v.total) as total_gastado
+            FROM ventas v
+            INNER JOIN usuarios u ON v.usuario_id = u.id
+            WHERE v.usuario_id IS NOT NULL
+            GROUP BY u.id, u.nombre, u.apellido, u.email
+            ORDER BY total_gastado DESC
+            LIMIT 5
+        `);
+        
+        // Ventas por método de pago
+        const [porMetodoPago] = await pool.promise().query(`
+            SELECT 
+                metodo_pago,
+                COUNT(*) as cantidad_ventas,
+                SUM(total) as ingresos_totales
+            FROM ventas
+            GROUP BY metodo_pago
+            ORDER BY ingresos_totales DESC
+        `);
+        
+        // Ventas de los últimos 7 días
+        const [ultimos7Dias] = await pool.promise().query(`
+            SELECT 
+                DATE_FORMAT(created_at, "%Y-%m-%d") as fecha,
+                DATE_FORMAT(created_at, "%d/%m") as fecha_corta,
+                COUNT(*) as ventas,
+                SUM(total) as ingresos
+            FROM ventas
+            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at) ASC
+        `);
+        
+        res.json({
+            generales: statsGenerales[0] || {
+                total_ventas: 0,
+                ingresos_totales: 0,
+                ticket_promedio: 0,
+                productos_vendidos: 0
+            },
+            hoy: ventasHoy[0] || {
+                ventas_hoy: 0,
+                ingresos_hoy: 0,
+                productos_vendidos_hoy: 0
+            },
+            mes_actual: ventasMes[0] || {
+                ventas_mes: 0,
+                ingresos_mes: 0,
+                productos_vendidos_mes: 0
+            },
+            top_productos: topProductos,
+            top_clientes: topClientes,
+            por_metodo_pago: porMetodoPago,
+            ultimos_7_dias: ultimos7Dias
+        });
+    } catch (error) {
+        console.error('Error en estadísticas de ventas:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ==================== ENTRENADORES ====================
 
 // Estadísticas de entrenadores (DEBE IR ANTES de /entrenadores/:id)
@@ -3770,7 +4037,11 @@ app.listen(port, () => {
     console.log('  DELETE /productos/:id - Eliminar producto');
     console.log('  POST /productos/:id/vender - Vender producto');
     console.log('  GET /productos/estadisticas - Estadísticas productos');
-    console.log('  GET /ventas - Historial de ventas');
+    console.log('\n📦 VENTAS:');
+    console.log('  GET /ventas - Historial de ventas (filtros: ?fecha_desde, fecha_hasta, usuario_id)');
+    console.log('  POST /ventas - Crear venta directa');
+    console.log('  GET /ventas/usuario/:id - Historial de compras de un usuario');
+    console.log('  GET /ventas/estadisticas - Estadísticas de ventas');
     console.log('\n💪 EJERCICIOS:');
     console.log('  GET /ejercicios - Listar ejercicios (filtros: ?grupo_muscular=pecho&tipo=fuerza&nivel=principiante)');
     console.log('  GET /ejercicios/:id - Ver ejercicio individual');
