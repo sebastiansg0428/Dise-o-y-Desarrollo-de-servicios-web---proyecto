@@ -1080,6 +1080,17 @@ app.get('/ventas/usuario/:id', async (req, res) => {
     try {
         const [ventas] = await pool.promise().query(query, params);
         
+        // Obtener información y estadísticas del usuario
+        const [usuario] = await pool.promise().query(`
+            SELECT 
+                id,
+                nombre,
+                apellido,
+                email
+            FROM usuarios
+            WHERE id = ?
+        `, [id]);
+        
         // Obtener estadísticas del usuario
         const [stats] = await pool.promise().query(`
             SELECT 
@@ -1094,6 +1105,7 @@ app.get('/ventas/usuario/:id', async (req, res) => {
         
         res.json({
             usuario_id: parseInt(id),
+            usuario: usuario[0] || null,
             estadisticas: stats[0] || {
                 total_compras: 0,
                 total_gastado: 0,
@@ -1961,25 +1973,40 @@ app.delete('/entrenadores/:entrenador_id/valoraciones/:valoracion_id', async (re
 
 // ==================== PAGOS Y FACTURAS ====================
 
-// Estadísticas de pagos
+// Estadísticas de pagos (incluye ventas de productos)
 app.get('/pagos/estadisticas', async (req, res) => {
     try {
-        const [stats] = await pool.promise().query(`
+        // Estadísticas de pagos (membresías y sesiones)
+        const [statsPagos] = await pool.promise().query(`
             SELECT 
                 COUNT(*) as total_pagos,
                 SUM(CASE WHEN estado = 'pagado' THEN 1 ELSE 0 END) as pagos_completados,
                 SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pagos_pendientes,
-                SUM(CASE WHEN estado = 'pagado' THEN monto ELSE 0 END) as ingresos_totales,
+                SUM(CASE WHEN estado = 'pagado' THEN monto ELSE 0 END) as ingresos_pagos,
                 SUM(CASE WHEN estado = 'pendiente' THEN monto ELSE 0 END) as por_cobrar,
                 COUNT(CASE WHEN DATE(fecha_pago) = CURDATE() THEN 1 END) as pagos_hoy,
-                SUM(CASE WHEN DATE(fecha_pago) = CURDATE() AND estado = 'pagado' THEN monto ELSE 0 END) as ingresos_hoy
+                SUM(CASE WHEN DATE(fecha_pago) = CURDATE() AND estado = 'pagado' THEN monto ELSE 0 END) as ingresos_pagos_hoy
             FROM pagos
         `);
         
+        // Estadísticas de ventas (productos)
+        const [statsVentas] = await pool.promise().query(`
+            SELECT 
+                COUNT(*) as total_ventas,
+                SUM(total) as ingresos_ventas,
+                COUNT(CASE WHEN DATE(created_at) = CURDATE() THEN 1 END) as ventas_hoy,
+                SUM(CASE WHEN DATE(created_at) = CURDATE() THEN total ELSE 0 END) as ingresos_ventas_hoy
+            FROM ventas
+        `);
+        
         const [porMetodo] = await pool.promise().query(`
-            SELECT metodo_pago, COUNT(*) as cantidad, SUM(monto) as total
+            SELECT metodo_pago, COUNT(*) as cantidad, SUM(monto) as total, 'pago' as tipo
             FROM pagos
             WHERE estado = 'pagado'
+            GROUP BY metodo_pago
+            UNION ALL
+            SELECT metodo_pago, COUNT(*) as cantidad, SUM(total) as total, 'venta' as tipo
+            FROM ventas
             GROUP BY metodo_pago
         `);
         
@@ -1990,12 +2017,36 @@ app.get('/pagos/estadisticas', async (req, res) => {
             GROUP BY tipo_pago
         `);
         
+        const ingresosPagos = parseFloat(statsPagos[0].ingresos_pagos) || 0;
+        const ingresosVentas = parseFloat(statsVentas[0].ingresos_ventas) || 0;
+        const ingresosPagosHoy = parseFloat(statsPagos[0].ingresos_pagos_hoy) || 0;
+        const ingresosVentasHoy = parseFloat(statsVentas[0].ingresos_ventas_hoy) || 0;
+        
         res.json({
-            ...stats[0],
+            // Totales combinados
+            total_transacciones: (statsPagos[0].total_pagos || 0) + (statsVentas[0].total_ventas || 0),
+            ingresos_totales: ingresosPagos + ingresosVentas,
+            transacciones_hoy: (statsPagos[0].pagos_hoy || 0) + (statsVentas[0].ventas_hoy || 0),
+            ingresos_hoy: ingresosPagosHoy + ingresosVentasHoy,
+            
+            // Desglose por origen
+            pagos: {
+                total: statsPagos[0].total_pagos || 0,
+                completados: statsPagos[0].pagos_completados || 0,
+                pendientes: statsPagos[0].pagos_pendientes || 0,
+                ingresos: ingresosPagos,
+                por_cobrar: parseFloat(statsPagos[0].por_cobrar) || 0
+            },
+            ventas: {
+                total: statsVentas[0].total_ventas || 0,
+                ingresos: ingresosVentas
+            },
+            
             por_metodo: porMetodo,
             por_tipo: porTipo
         });
     } catch (error) {
+        console.error('Error en estadísticas de pagos:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -2191,7 +2242,96 @@ app.get('/pagos/estadisticas/sesiones', async (req, res) => {
     }
 });
 
-// Listar pagos
+// Listar todas las transacciones (pagos + ventas)
+app.get('/transacciones', async (req, res) => {
+    const { usuario_id, tipo, metodo_pago, fecha_desde, fecha_hasta } = req.query;
+    
+    try {
+        let queryPagos = `
+            SELECT 
+                p.id,
+                CAST('pago' AS CHAR(50)) COLLATE utf8mb4_unicode_ci as tipo_transaccion,
+                p.usuario_id,
+                CAST(p.tipo_pago AS CHAR(100)) COLLATE utf8mb4_unicode_ci as subtipo,
+                CAST(p.concepto AS CHAR(255)) COLLATE utf8mb4_unicode_ci as descripcion,
+                p.monto as total,
+                CAST(p.metodo_pago AS CHAR(50)) COLLATE utf8mb4_unicode_ci as metodo_pago,
+                CAST(p.estado AS CHAR(50)) COLLATE utf8mb4_unicode_ci as estado,
+                DATE_FORMAT(p.fecha_pago, "%d/%m/%Y %H:%i") as fecha,
+                DATE_FORMAT(p.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
+                CAST(COALESCE(u.nombre, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_nombre,
+                CAST(COALESCE(u.apellido, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_apellido,
+                CAST(COALESCE(u.email, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_email
+            FROM pagos p
+            LEFT JOIN usuarios u ON p.usuario_id = u.id
+            WHERE 1=1
+        `;
+        
+        let queryVentas = `
+            SELECT 
+                v.id,
+                CAST('venta' AS CHAR(50)) COLLATE utf8mb4_unicode_ci as tipo_transaccion,
+                v.usuario_id,
+                CAST('producto' AS CHAR(100)) COLLATE utf8mb4_unicode_ci as subtipo,
+                CAST(CONCAT(p.nombre, ' (x', v.cantidad, ')') AS CHAR(255)) COLLATE utf8mb4_unicode_ci as descripcion,
+                v.total,
+                CAST(v.metodo_pago AS CHAR(50)) COLLATE utf8mb4_unicode_ci as metodo_pago,
+                CAST('pagado' AS CHAR(50)) COLLATE utf8mb4_unicode_ci as estado,
+                DATE_FORMAT(v.created_at, "%d/%m/%Y %H:%i") as fecha,
+                DATE_FORMAT(v.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
+                CAST(COALESCE(u.nombre, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_nombre,
+                CAST(COALESCE(u.apellido, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_apellido,
+                CAST(COALESCE(u.email, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_email
+            FROM ventas v
+            INNER JOIN productos p ON v.producto_id = p.id
+            LEFT JOIN usuarios u ON v.usuario_id = u.id
+            WHERE 1=1
+        `;
+        
+        const params = [];
+        
+        if (usuario_id) {
+            queryPagos += ' AND p.usuario_id = ?';
+            queryVentas += ' AND v.usuario_id = ?';
+            params.push(usuario_id);
+        }
+        
+        if (metodo_pago) {
+            queryPagos += ' AND p.metodo_pago = ?';
+            queryVentas += ' AND v.metodo_pago = ?';
+            params.push(metodo_pago);
+        }
+        
+        if (fecha_desde) {
+            queryPagos += ' AND DATE(p.fecha_pago) >= ?';
+            queryVentas += ' AND DATE(v.created_at) >= ?';
+            params.push(fecha_desde);
+        }
+        
+        if (fecha_hasta) {
+            queryPagos += ' AND DATE(p.fecha_pago) <= ?';
+            queryVentas += ' AND DATE(v.created_at) <= ?';
+            params.push(fecha_hasta);
+        }
+        
+        let query = '';
+        if (!tipo || tipo === 'todos') {
+            query = `(${queryPagos}) UNION ALL (${queryVentas}) ORDER BY id DESC LIMIT 100`;
+        } else if (tipo === 'pagos') {
+            query = queryPagos + ' ORDER BY p.created_at DESC LIMIT 100';
+        } else if (tipo === 'ventas') {
+            query = queryVentas + ' ORDER BY v.created_at DESC LIMIT 100';
+        }
+        
+        const [rows] = await pool.promise().query(query, params);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error al obtener transacciones:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Listar pagos (solo membresías y sesiones)
 app.get('/pagos', async (req, res) => {
     const { usuario_id, tipo_pago, estado, metodo_pago, fecha_desde, fecha_hasta } = req.query;
     
@@ -2202,7 +2342,7 @@ app.get('/pagos', async (req, res) => {
                DATE_FORMAT(p.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
                u.nombre as usuario_nombre, u.apellido as usuario_apellido, u.email as usuario_email
         FROM pagos p
-        INNER JOIN usuarios u ON p.usuario_id = u.id
+        LEFT JOIN usuarios u ON p.usuario_id = u.id
         WHERE 1=1
     `;
     
@@ -3757,12 +3897,12 @@ app.get('/reportes/ventas-por-usuario', async (req, res) => {
     try {
         const [ventas] = await pool.promise().query(`
             SELECT 
-                u.id, u.nombre, u.apellido,
+                u.id, u.nombre, u.apellido, u.email,
                 COUNT(v.id) as total_compras,
                 SUM(v.total) as total_gastado
             FROM usuarios u
             LEFT JOIN ventas v ON u.id = v.usuario_id
-            GROUP BY u.id
+            GROUP BY u.id, u.nombre, u.apellido, u.email
             HAVING total_compras > 0
             ORDER BY total_gastado DESC
             LIMIT 20
@@ -4085,15 +4225,16 @@ app.listen(port, () => {
     console.log('  PUT /sesiones/:id - Actualizar sesión');
     console.log('  DELETE /sesiones/:id - Eliminar sesión');
     console.log('  GET /sesiones/:id - Ver sesión individual');
-    console.log('\n🏷️ PAGOS:');
-    console.log('  GET /pagos - Listar pagos (filtros: ?usuario_id, tipo_pago, estado, fecha_desde, fecha_hasta)');
+    console.log('\n💰 TRANSACCIONES Y PAGOS:');
+    console.log('  GET /transacciones - Listar todas las transacciones (pagos + ventas) con filtros: ?usuario_id, tipo, metodo_pago, fecha_desde, fecha_hasta');
+    console.log('  GET /pagos - Listar pagos de membresías y sesiones (filtros: ?usuario_id, tipo_pago, estado, fecha_desde, fecha_hasta)');
     console.log('  GET /pagos/:id - Ver pago individual');
     console.log('  POST /pagos - Crear pago (filtros: ?usuario_id, tipo_pago, monto, estado, fecha)');
     console.log('  PUT /pagos/:id - Actualizar pago');
     console.log('  DELETE /pagos/:id - Cancelar pago');
     console.log('  POST /pagos/renovar-membresia - Renovar membresía con pago');
-    console.log('\n📊 ESTADÍSTICAS DE PAGOS:');
-    console.log('  GET /pagos/estadisticas - Estadísticas de pagos');
+    console.log('\n📊 ESTADÍSTICAS DE PAGOS Y VENTAS:');
+    console.log('  GET /pagos/estadisticas - Estadísticas unificadas (pagos + ventas)');
     console.log('  GET /pagos/estadisticas/membresias - Estadísticas de membresías');
     console.log('  GET /pagos/estadisticas/productos - Estadísticas de productos');
     console.log('  GET /pagos/estadisticas/sesiones - Estadísticas de sesiones');
