@@ -40,6 +40,46 @@ const pool = mysql.createPool({
 rbacMiddleware.initPool(pool);
 rbacDb.initRbacDb(pool);
 
+// ==================== FUNCIONES COMPARTIDAS ====================
+
+// Función para calcular ingresos totales (pagos + ventas) - Usada en Dashboard, Reportes y Estadísticas
+async function calcularIngresosTotales(condicionFecha = '', params = []) {
+    try {
+        // Preparar condición para ventas (reemplazar fecha_pago con created_at)
+        const condicionVentas = condicionFecha.replace(/fecha_pago/g, 'created_at');
+        
+        // Ingresos de pagos (membresías, sesiones, etc.)
+        const queryPagos = `
+            SELECT COALESCE(SUM(monto), 0) as total
+            FROM pagos
+            WHERE estado = 'pagado'
+            ${condicionFecha ? 'AND (' + condicionFecha + ')' : ''}
+        `;
+        
+        // Ingresos de ventas (productos)
+        const queryVentas = `
+            SELECT COALESCE(SUM(total), 0) as total
+            FROM ventas
+            ${condicionVentas ? 'WHERE ' + condicionVentas : ''}
+        `;
+        
+        const [resultPagos] = await pool.promise().query(queryPagos, params);
+        const [resultVentas] = await pool.promise().query(queryVentas, params);
+        
+        const ingresosPagos = parseFloat(resultPagos[0].total) || 0;
+        const ingresosVentas = parseFloat(resultVentas[0].total) || 0;
+        
+        return {
+            total: ingresosPagos + ingresosVentas,
+            pagos: ingresosPagos,
+            ventas: ingresosVentas
+        };
+    } catch (error) {
+        console.error('❌ Error calculando ingresos:', error);
+        return { total: 0, pagos: 0, ventas: 0 };
+    }
+}
+
 // ==================== USUARIOS ====================
 
 // NOTA DE SEGURIDAD: Las contraseñas deberían estar hasheadas con bcrypt
@@ -1973,6 +2013,79 @@ app.delete('/entrenadores/:entrenador_id/valoraciones/:valoracion_id', async (re
 
 // ==================== PAGOS Y FACTURAS ====================
 
+// Estadísticas globales de ingresos (UNIFICADO - usa función compartida)
+app.get('/estadisticas/ingresos', async (req, res) => {
+    try {
+        // Ingresos totales históricos
+        const ingresosHistoricos = await calcularIngresosTotales();
+        
+        // Ingresos del mes actual
+        const ingresosMesActual = await calcularIngresosTotales(
+            'MONTH(fecha_pago) = MONTH(CURDATE()) AND YEAR(fecha_pago) = YEAR(CURDATE())'
+        );
+        
+        // Ingresos del mes anterior
+        const ingresosMesAnterior = await calcularIngresosTotales(
+            'MONTH(fecha_pago) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND YEAR(fecha_pago) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))'
+        );
+        
+        // Ingresos de hoy
+        const ingresosHoy = await calcularIngresosTotales(
+            'DATE(fecha_pago) = CURDATE()'
+        );
+        
+        // Ingresos del año actual
+        const ingresosAnioActual = await calcularIngresosTotales(
+            'YEAR(fecha_pago) = YEAR(CURDATE())'
+        );
+        
+        // Calcular porcentaje de cambio
+        let porcentajeCambioMensual = 0;
+        if (ingresosMesAnterior.total > 0) {
+            porcentajeCambioMensual = Math.round(((ingresosMesActual.total - ingresosMesAnterior.total) / ingresosMesAnterior.total) * 100);
+        } else if (ingresosMesActual.total > 0) {
+            porcentajeCambioMensual = 100;
+        }
+        
+        res.json({
+            historicos: {
+                total: ingresosHistoricos.total,
+                pagos: ingresosHistoricos.pagos,
+                ventas: ingresosHistoricos.ventas
+            },
+            mes_actual: {
+                total: ingresosMesActual.total,
+                pagos: ingresosMesActual.pagos,
+                ventas: ingresosMesActual.ventas
+            },
+            mes_anterior: {
+                total: ingresosMesAnterior.total,
+                pagos: ingresosMesAnterior.pagos,
+                ventas: ingresosMesAnterior.ventas
+            },
+            hoy: {
+                total: ingresosHoy.total,
+                pagos: ingresosHoy.pagos,
+                ventas: ingresosHoy.ventas
+            },
+            anio_actual: {
+                total: ingresosAnioActual.total,
+                pagos: ingresosAnioActual.pagos,
+                ventas: ingresosAnioActual.ventas
+            },
+            cambio_mensual: {
+                porcentaje: porcentajeCambioMensual,
+                texto: porcentajeCambioMensual >= 0 
+                    ? `+${porcentajeCambioMensual}% vs mes anterior` 
+                    : `${porcentajeCambioMensual}% vs mes anterior`
+            }
+        });
+    } catch (error) {
+        console.error('Error en estadísticas de ingresos:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Estadísticas de pagos (incluye ventas de productos)
 app.get('/pagos/estadisticas', async (req, res) => {
     try {
@@ -1999,16 +2112,58 @@ app.get('/pagos/estadisticas', async (req, res) => {
             FROM ventas
         `);
         
-        const [porMetodo] = await pool.promise().query(`
-            SELECT metodo_pago, COUNT(*) as cantidad, SUM(monto) as total, 'pago' as tipo
+        // Métodos de pago - solo de tabla pagos
+        const [porMetodoPagos] = await pool.promise().query(`
+            SELECT metodo_pago, COUNT(*) as cantidad, SUM(monto) as total
             FROM pagos
             WHERE estado = 'pagado'
             GROUP BY metodo_pago
-            UNION ALL
-            SELECT metodo_pago, COUNT(*) as cantidad, SUM(total) as total, 'venta' as tipo
-            FROM ventas
-            GROUP BY metodo_pago
         `);
+        
+        // Métodos de pago - de tabla ventas (productos)
+        let porMetodoVentas = [];
+        try {
+            const [ventas] = await pool.promise().query(`
+                SELECT metodo_pago, COUNT(*) as cantidad, SUM(total) as total
+                FROM ventas
+                GROUP BY metodo_pago
+            `);
+            porMetodoVentas = ventas;
+        } catch (e) {
+            // Si la tabla ventas no existe o hay error, continuar sin ventas
+            console.log('Tabla ventas no disponible:', e.message);
+        }
+        
+        // Combinar métodos de pago manualmente
+        const metodosPagoMap = {};
+        porMetodoPagos.forEach(item => {
+            metodosPagoMap[item.metodo_pago] = {
+                metodo_pago: item.metodo_pago,
+                cantidad_pagos: parseInt(item.cantidad),
+                total_pagos: parseFloat(item.total),
+                cantidad_ventas: 0,
+                total_ventas: 0
+            };
+        });
+        porMetodoVentas.forEach(item => {
+            if (metodosPagoMap[item.metodo_pago]) {
+                metodosPagoMap[item.metodo_pago].cantidad_ventas = parseInt(item.cantidad);
+                metodosPagoMap[item.metodo_pago].total_ventas = parseFloat(item.total);
+            } else {
+                metodosPagoMap[item.metodo_pago] = {
+                    metodo_pago: item.metodo_pago,
+                    cantidad_pagos: 0,
+                    total_pagos: 0,
+                    cantidad_ventas: parseInt(item.cantidad),
+                    total_ventas: parseFloat(item.total)
+                };
+            }
+        });
+        const porMetodo = Object.values(metodosPagoMap).map(item => ({
+            metodo_pago: item.metodo_pago,
+            cantidad: item.cantidad_pagos + item.cantidad_ventas,
+            total: item.total_pagos + item.total_ventas
+        }));
         
         const [porTipo] = await pool.promise().query(`
             SELECT tipo_pago, COUNT(*) as cantidad, SUM(monto) as total
@@ -2247,83 +2402,118 @@ app.get('/transacciones', async (req, res) => {
     const { usuario_id, tipo, metodo_pago, fecha_desde, fecha_hasta } = req.query;
     
     try {
-        let queryPagos = `
-            SELECT 
-                p.id,
-                CAST('pago' AS CHAR(50)) COLLATE utf8mb4_unicode_ci as tipo_transaccion,
-                p.usuario_id,
-                CAST(p.tipo_pago AS CHAR(100)) COLLATE utf8mb4_unicode_ci as subtipo,
-                CAST(p.concepto AS CHAR(255)) COLLATE utf8mb4_unicode_ci as descripcion,
-                p.monto as total,
-                CAST(p.metodo_pago AS CHAR(50)) COLLATE utf8mb4_unicode_ci as metodo_pago,
-                CAST(p.estado AS CHAR(50)) COLLATE utf8mb4_unicode_ci as estado,
-                DATE_FORMAT(p.fecha_pago, "%d/%m/%Y %H:%i") as fecha,
-                DATE_FORMAT(p.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
-                CAST(COALESCE(u.nombre, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_nombre,
-                CAST(COALESCE(u.apellido, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_apellido,
-                CAST(COALESCE(u.email, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_email
-            FROM pagos p
-            LEFT JOIN usuarios u ON p.usuario_id = u.id
-            WHERE 1=1
-        `;
+        let rows = [];
         
-        let queryVentas = `
-            SELECT 
-                v.id,
-                CAST('venta' AS CHAR(50)) COLLATE utf8mb4_unicode_ci as tipo_transaccion,
-                v.usuario_id,
-                CAST('producto' AS CHAR(100)) COLLATE utf8mb4_unicode_ci as subtipo,
-                CAST(CONCAT(p.nombre, ' (x', v.cantidad, ')') AS CHAR(255)) COLLATE utf8mb4_unicode_ci as descripcion,
-                v.total,
-                CAST(v.metodo_pago AS CHAR(50)) COLLATE utf8mb4_unicode_ci as metodo_pago,
-                CAST('pagado' AS CHAR(50)) COLLATE utf8mb4_unicode_ci as estado,
-                DATE_FORMAT(v.created_at, "%d/%m/%Y %H:%i") as fecha,
-                DATE_FORMAT(v.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
-                CAST(COALESCE(u.nombre, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_nombre,
-                CAST(COALESCE(u.apellido, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_apellido,
-                CAST(COALESCE(u.email, '') AS CHAR(100)) COLLATE utf8mb4_unicode_ci as usuario_email
-            FROM ventas v
-            INNER JOIN productos p ON v.producto_id = p.id
-            LEFT JOIN usuarios u ON v.usuario_id = u.id
-            WHERE 1=1
-        `;
-        
-        const params = [];
-        
-        if (usuario_id) {
-            queryPagos += ' AND p.usuario_id = ?';
-            queryVentas += ' AND v.usuario_id = ?';
-            params.push(usuario_id);
+        // Si se solicitan solo pagos o todos
+        if (!tipo || tipo === 'todos' || tipo === 'pagos') {
+            let queryPagos = `
+                SELECT 
+                    p.id,
+                    'pago' as tipo_transaccion,
+                    p.usuario_id,
+                    p.tipo_pago as subtipo,
+                    p.concepto as descripcion,
+                    p.monto as total,
+                    p.metodo_pago,
+                    p.estado,
+                    DATE_FORMAT(p.fecha_pago, "%d/%m/%Y %H:%i") as fecha,
+                    DATE_FORMAT(p.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
+                    COALESCE(u.nombre, '') as usuario_nombre,
+                    COALESCE(u.apellido, '') as usuario_apellido,
+                    COALESCE(u.email, '') as usuario_email,
+                    UNIX_TIMESTAMP(p.created_at) as orden_tiempo
+                FROM pagos p
+                LEFT JOIN usuarios u ON p.usuario_id = u.id
+                WHERE 1=1
+            `;
+            
+            const paramsPagos = [];
+            
+            if (usuario_id) {
+                queryPagos += ' AND p.usuario_id = ?';
+                paramsPagos.push(usuario_id);
+            }
+            
+            if (metodo_pago) {
+                queryPagos += ' AND p.metodo_pago = ?';
+                paramsPagos.push(metodo_pago);
+            }
+            
+            if (fecha_desde) {
+                queryPagos += ' AND DATE(p.fecha_pago) >= ?';
+                paramsPagos.push(fecha_desde);
+            }
+            
+            if (fecha_hasta) {
+                queryPagos += ' AND DATE(p.fecha_pago) <= ?';
+                paramsPagos.push(fecha_hasta);
+            }
+            
+            queryPagos += ' ORDER BY p.created_at DESC LIMIT 100';
+            
+            const [pagos] = await pool.promise().query(queryPagos, paramsPagos);
+            rows = rows.concat(pagos);
         }
         
-        if (metodo_pago) {
-            queryPagos += ' AND p.metodo_pago = ?';
-            queryVentas += ' AND v.metodo_pago = ?';
-            params.push(metodo_pago);
+        // Si se solicitan solo ventas o todos
+        if (!tipo || tipo === 'todos' || tipo === 'ventas') {
+            let queryVentas = `
+                SELECT 
+                    v.id,
+                    'venta' as tipo_transaccion,
+                    v.usuario_id,
+                    'producto' as subtipo,
+                    CONCAT(p.nombre, ' (x', v.cantidad, ')') as descripcion,
+                    v.total,
+                    v.metodo_pago,
+                    'pagado' as estado,
+                    DATE_FORMAT(v.created_at, "%d/%m/%Y %H:%i") as fecha,
+                    DATE_FORMAT(v.created_at, "%d/%m/%Y %H:%i") as fecha_registro,
+                    COALESCE(u.nombre, '') as usuario_nombre,
+                    COALESCE(u.apellido, '') as usuario_apellido,
+                    COALESCE(u.email, '') as usuario_email,
+                    UNIX_TIMESTAMP(v.created_at) as orden_tiempo
+                FROM ventas v
+                INNER JOIN productos p ON v.producto_id = p.id
+                LEFT JOIN usuarios u ON v.usuario_id = u.id
+                WHERE 1=1
+            `;
+            
+            const paramsVentas = [];
+            
+            if (usuario_id) {
+                queryVentas += ' AND v.usuario_id = ?';
+                paramsVentas.push(usuario_id);
+            }
+            
+            if (metodo_pago) {
+                queryVentas += ' AND v.metodo_pago = ?';
+                paramsVentas.push(metodo_pago);
+            }
+            
+            if (fecha_desde) {
+                queryVentas += ' AND DATE(v.created_at) >= ?';
+                paramsVentas.push(fecha_desde);
+            }
+            
+            if (fecha_hasta) {
+                queryVentas += ' AND DATE(v.created_at) <= ?';
+                paramsVentas.push(fecha_hasta);
+            }
+            
+            queryVentas += ' ORDER BY v.created_at DESC LIMIT 100';
+            
+            const [ventas] = await pool.promise().query(queryVentas, paramsVentas);
+            rows = rows.concat(ventas);
         }
         
-        if (fecha_desde) {
-            queryPagos += ' AND DATE(p.fecha_pago) >= ?';
-            queryVentas += ' AND DATE(v.created_at) >= ?';
-            params.push(fecha_desde);
-        }
+        // Ordenar por tiempo y limitar a 100
+        rows.sort((a, b) => b.orden_tiempo - a.orden_tiempo);
+        rows = rows.slice(0, 100);
         
-        if (fecha_hasta) {
-            queryPagos += ' AND DATE(p.fecha_pago) <= ?';
-            queryVentas += ' AND DATE(v.created_at) <= ?';
-            params.push(fecha_hasta);
-        }
+        // Eliminar el campo orden_tiempo antes de enviar
+        rows.forEach(row => delete row.orden_tiempo);
         
-        let query = '';
-        if (!tipo || tipo === 'todos') {
-            query = `(${queryPagos}) UNION ALL (${queryVentas}) ORDER BY id DESC LIMIT 100`;
-        } else if (tipo === 'pagos') {
-            query = queryPagos + ' ORDER BY p.created_at DESC LIMIT 100';
-        } else if (tipo === 'ventas') {
-            query = queryVentas + ' ORDER BY v.created_at DESC LIMIT 100';
-        }
-        
-        const [rows] = await pool.promise().query(query, params);
         res.json(rows);
     } catch (error) {
         console.error('Error al obtener transacciones:', error);
@@ -3610,22 +3800,21 @@ app.get('/dashboard', async (req, res) => {
             FROM usuarios
         `);
 
-        // 2. Ingresos del mes actual
-        const [ingresosStats] = await pool.promise().query(`
-            SELECT 
-                COALESCE(SUM(CASE WHEN estado = 'pagado' AND MONTH(fecha_pago) = MONTH(CURDATE()) AND YEAR(fecha_pago) = YEAR(CURDATE()) THEN monto ELSE 0 END), 0) as ingresos_mes_actual,
-                COALESCE(SUM(CASE WHEN estado = 'pagado' AND MONTH(fecha_pago) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND YEAR(fecha_pago) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) THEN monto ELSE 0 END), 0) as ingresos_mes_anterior
-            FROM pagos
-        `);
+        // 2. Ingresos del mes actual y anterior (PAGOS + VENTAS)
+        const ingresosMesActual = await calcularIngresosTotales(
+            'MONTH(fecha_pago) = MONTH(CURDATE()) AND YEAR(fecha_pago) = YEAR(CURDATE())'
+        );
+        
+        const ingresosMesAnterior = await calcularIngresosTotales(
+            'MONTH(fecha_pago) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND YEAR(fecha_pago) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))'
+        );
 
         // Calcular porcentaje de cambio en ingresos
-        const ingresosMesActual = parseFloat(ingresosStats[0].ingresos_mes_actual) || 0;
-        const ingresosMesAnterior = parseFloat(ingresosStats[0].ingresos_mes_anterior) || 0;
         let porcentajeCambioIngresos = 0;
         
-        if (ingresosMesAnterior > 0) {
-            porcentajeCambioIngresos = Math.round(((ingresosMesActual - ingresosMesAnterior) / ingresosMesAnterior) * 100);
-        } else if (ingresosMesActual > 0) {
+        if (ingresosMesAnterior.total > 0) {
+            porcentajeCambioIngresos = Math.round(((ingresosMesActual.total - ingresosMesAnterior.total) / ingresosMesAnterior.total) * 100);
+        } else if (ingresosMesActual.total > 0) {
             porcentajeCambioIngresos = 100;
         }
 
@@ -3731,9 +3920,12 @@ app.get('/dashboard', async (req, res) => {
                 porcentaje_asistencia: parseFloat(usuariosStats[0]?.porcentaje_asistencia) || 0
             },
             ingresos: {
-                total: ingresosMesActual,  // Alias
-                mes_actual: ingresosMesActual,
-                mes_anterior: ingresosMesAnterior,
+                total: ingresosMesActual.total,  // Total combinado
+                mes_actual: ingresosMesActual.total,
+                mes_anterior: ingresosMesAnterior.total,
+                // Desglose por fuente
+                pagos: ingresosMesActual.pagos,
+                ventas: ingresosMesActual.ventas,
                 cambio_porcentaje: porcentajeCambioIngresos,
                 cambio: porcentajeCambioIngresos,  // Alias
                 texto_cambio: porcentajeCambioIngresos >= 0 
@@ -3752,7 +3944,7 @@ app.get('/dashboard', async (req, res) => {
                 totalClientes: totalClientes,
                 clientesActivos: clientesActivos,
                 asistenciaHoy: asistenciaHoy,
-                ingresosMes: ingresosMesActual,
+                ingresosMes: ingresosMesActual.total,
                 rutinasActivas: rutinasActivas
             }
         });
@@ -3769,9 +3961,11 @@ app.get('/dashboard', async (req, res) => {
 // ==================== REPORTES ====================
 
 // Ingresos mensuales del año actual
+// Ingresos mensuales del año actual (PAGOS + VENTAS UNIFICADO)
 app.get('/reportes/ingresos-mensuales', async (req, res) => {
     try {
-        const [ingresos] = await pool.promise().query(`
+        // Ingresos de pagos por mes
+        const [ingresosPagos] = await pool.promise().query(`
             SELECT 
                 MONTH(fecha_pago) as mes,
                 MONTHNAME(fecha_pago) as nombre_mes,
@@ -3782,8 +3976,55 @@ app.get('/reportes/ingresos-mensuales', async (req, res) => {
             GROUP BY MONTH(fecha_pago), MONTHNAME(fecha_pago)
             ORDER BY mes
         `);
-        res.json(ingresos);
+        
+        // Ingresos de ventas por mes
+        const [ingresosVentas] = await pool.promise().query(`
+            SELECT 
+                MONTH(created_at) as mes,
+                MONTHNAME(created_at) as nombre_mes,
+                SUM(total) as total
+            FROM ventas
+            WHERE YEAR(created_at) = YEAR(CURDATE())
+            GROUP BY MONTH(created_at), MONTHNAME(created_at)
+            ORDER BY mes
+        `);
+        
+        // Combinar resultados por mes
+        const ingresosPorMes = {};
+        
+        // Agregar ingresos de pagos
+        ingresosPagos.forEach(item => {
+            ingresosPorMes[item.mes] = {
+                mes: item.mes,
+                nombre_mes: item.nombre_mes,
+                pagos: parseFloat(item.total) || 0,
+                ventas: 0,
+                total: parseFloat(item.total) || 0
+            };
+        });
+        
+        // Agregar ingresos de ventas
+        ingresosVentas.forEach(item => {
+            if (ingresosPorMes[item.mes]) {
+                ingresosPorMes[item.mes].ventas = parseFloat(item.total) || 0;
+                ingresosPorMes[item.mes].total += parseFloat(item.total) || 0;
+            } else {
+                ingresosPorMes[item.mes] = {
+                    mes: item.mes,
+                    nombre_mes: item.nombre_mes,
+                    pagos: 0,
+                    ventas: parseFloat(item.total) || 0,
+                    total: parseFloat(item.total) || 0
+                };
+            }
+        });
+        
+        // Convertir a array y ordenar por mes
+        const resultado = Object.values(ingresosPorMes).sort((a, b) => a.mes - b.mes);
+        
+        res.json(resultado);
     } catch (error) {
+        console.error('Error en reportes/ingresos-mensuales:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -4158,7 +4399,11 @@ app.listen(port, () => {
     console.log('\n📋 ENDPOINTS DISPONIBLES:');
     console.log('🏠 DASHBOARD:');
     console.log('  GET /dashboard - Datos completos del dashboard (clientes, ingresos, rutinas, actividad reciente)');
-    console.log('\n👤 USUARIOS:');
+    console.log('\n� INGRESOS UNIFICADOS (PAGOS + VENTAS):');
+    console.log('  GET /estadisticas/ingresos - Estadísticas globales de ingresos (mes actual, anterior, hoy, año)');
+    console.log('  GET /reportes/ingresos-mensuales - Ingresos mensuales del año (desglose pagos + ventas)');
+    console.log('  GET /pagos/estadisticas - Estadísticas detalladas de pagos y ventas');
+    console.log('\n�👤 USUARIOS:');
     console.log('  POST /login - Iniciar sesión');
     console.log('  POST /register - Autoregistro de usuario (público)');
     console.log('  POST /admin/clientes - Crear cliente (administrador) con filtros: ?nombre, apellido, email, telefono, genero, fecha_nacimiento, especialidad_principal, experiencia_anios, certificaciones, biografia, tarifa_rutina');
